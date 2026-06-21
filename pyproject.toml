@@ -1,0 +1,29 @@
+[project]
+name = "smart-finance-tracker"
+version = "0.1.0"
+description = "Event-driven transaction ingestion pipeline for banking push notifications."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "instructor",
+    "pydantic",
+    "python-dotenv",
+    "supabase",
+    "uvicorn",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

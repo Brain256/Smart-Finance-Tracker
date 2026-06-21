@@ -1,0 +1,9 @@
+fastapi
+instructor
+pydantic
+python-dotenv
+supabase
+uvicorn
+
+[dev]
+pytest

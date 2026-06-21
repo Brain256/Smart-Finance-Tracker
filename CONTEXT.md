@@ -43,5 +43,14 @@ Codex must strictly follow these schemas when building inputs and outputs. No va
 ```json
 {
   "notification_text": "BMO Credit Card: Approved $14.50 at Tim Hortons",
-  "timestamp": "2026-06-17T20:55:00Z"
+  "timestamp": "1782057637417"
 }
+```
+
+`timestamp` accepts any of the following formats:
+- ISO 8601 timezone-aware datetime string, e.g. `"2026-06-17T20:55:00Z"`.
+- Unix timestamp in seconds, e.g. `"1782057883"`.
+- Unix timestamp in milliseconds, e.g. `"1782057637417"`.
+
+The ingestion schema normalizes all accepted timestamp formats into a
+timezone-aware UTC datetime before downstream processing.

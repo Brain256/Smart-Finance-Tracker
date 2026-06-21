@@ -1,0 +1,13 @@
+Metadata-Version: 2.4
+Name: smart-finance-tracker
+Version: 0.1.0
+Summary: Event-driven transaction ingestion pipeline for banking push notifications.
+Requires-Python: >=3.11
+Requires-Dist: fastapi
+Requires-Dist: instructor
+Requires-Dist: pydantic
+Requires-Dist: python-dotenv
+Requires-Dist: supabase
+Requires-Dist: uvicorn
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"
