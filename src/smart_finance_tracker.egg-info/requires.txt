@@ -1,5 +1,6 @@
 fastapi
 instructor
+openai
 pydantic
 python-dotenv
 supabase

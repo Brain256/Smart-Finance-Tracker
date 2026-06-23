@@ -5,6 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
+from src.schemas.transaction import CleanTransaction
+
 
 class HealthResponse(BaseModel):
     """Represents the liveness response returned by the health endpoint.
@@ -24,9 +26,11 @@ class IngestAcceptedResponse(BaseModel):
     Attributes:
         status: Static acceptance marker for successfully validated requests.
         timestamp: The parsed notification timestamp received from the phone.
+        transaction: Normalized transaction entities extracted from the raw text.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     status: Literal["accepted"]
     timestamp: datetime
+    transaction: CleanTransaction

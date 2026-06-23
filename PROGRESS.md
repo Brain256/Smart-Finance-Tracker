@@ -107,31 +107,41 @@
    ```
 
 ## Phase 2: Schema Boundaries, AI Parsing Engine, & Prompt Engineering
-- [ ] **2.1 Define Data Transfer Objects (DTO) via Pydantic v2 Models**
+- [x] **2.1 Define Data Transfer Objects (DTO) via Pydantic v2 Models**
   - Target Path: `src/schemas/transaction.py`
   - Implement a `CategoryEnum` subclassing `str` and `Enum` restricting options exactly to: `["Food", "Transport", "Entertainment", "Bills", "Shopping", "Income", "Miscellaneous"]`.
   - Construct `CleanTransaction` schema for database insertion matching fields: `merchant_name: str`, `amount: float`, and `category: CategoryEnum`.
-- [ ] **2.2 Compile Static `schema.json` Blueprint**
+- [x] **2.2 Compile Static `schema.json` Blueprint**
   - Execute a configuration script using Pydantic's `.model_json_schema()` to export types into a root level `schema.json` file for Codex context indexing.
-- [ ] **2.3 Build Async AI Client Wrapper with Instructor Layer Integration**
+- [x] **2.3 Build Async AI Client Wrapper with Instructor Layer Integration**
   - Target Path: `src/services/ai_extractor.py`
   - Patch an async OpenAI/Groq or Google client wrapper instance using `instructor.from_openai()` or `instructor.from_gemini()`.
   - Implement `async def extract_transaction_entities(raw_text: str) -> CleanTransaction:` executing structural tool completion calls.
   - Hardcode strict linguistic compiler system instructions ensuring merchant names are cleanly normalized (e.g., mapping `"TIM HORTONS #4920"` cleanly to `"Tim Hortons"`).
+- [x] **2.4 Add Automated Extraction Regression Tests**
+  - Target Path: `tests/test_ai_extractor.py`
+  - Target Path: `tests/test_transaction_schemas.py`
+  - Extended `tests/test_gateway.py` to verify `/api/v1/ingest` calls the extraction layer and returns the clean transaction payload.
+  - Verified with `python -m pytest`: `12 passed, 1 warning`.
 
 ## Phase 3: Persistent Data Layer & Idempotency Controls
-- [ ] **3.1 Execute Supabase Relational Schema Queries**
+- [x] **3.1 Prepare Supabase Relational Schema Queries**
   - Access Supabase SQL editor and execute the raw `expenses` data table schema definition:
     - `id` (BIGSERIAL, Primary Key), `created_at` (TIMESTAMPTZ), `merchant_name` (VARCHAR), `amount` (NUMERIC(10,2)), `category` (VARCHAR), `timestamp` (TIMESTAMPTZ).
   - Inject a multi-column composite constraint naming convention rule: `CONSTRAINT unique_transaction_signature UNIQUE (merchant_name, amount, timestamp)`.
-- [ ] **3.2 Initialize Persistent Client Connectors**
+  - Added `supabase/expenses.sql` containing the required table and unique constraint SQL for manual execution in the Supabase SQL editor.
+- [x] **3.2 Initialize Persistent Client Connectors**
   - Target Path: `src/core/database.py`
   - Instantiate an async-capable Supabase client connection hook pool utilizing the environment URL and service role execution credentials.
-- [ ] **3.3 Connect Ingestion Handlers to Database Operations with Exception Trapping**
+- [x] **3.3 Connect Ingestion Handlers to Database Operations with Exception Trapping**
   - Target Path: `api/index.py`
   - Process inbound notification strings through the `ai_extractor` service layer.
   - Execute a Supabase `.upsert()` operation targeting the clean transaction record.
   - Implement an implicit try/except structure: if an integrity exception hits due to duplicate composite signature block violations, suppress the failure quietly and return an HTTP `200 OK` status back to the smartphone client application.
+- [x] **3.4 Add Persistent Data Layer Regression Tests**
+  - Target Path: `tests/test_database.py`
+  - Extended `tests/test_gateway.py` to verify standard storage returns HTTP `202` and duplicate retry handling returns HTTP `200`.
+  - Verified with `python -m pytest`: `18 passed, 1 warning`.
 
 ## Phase 4: UI Dashboard & Frontend Presentation Tier
 - [ ] **4.1 Spin Up Next.js Workspace Architecture**

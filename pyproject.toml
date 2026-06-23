@@ -6,6 +6,7 @@ requires-python = ">=3.11"
 dependencies = [
     "fastapi",
     "instructor",
+    "openai",
     "pydantic",
     "python-dotenv",
     "supabase",

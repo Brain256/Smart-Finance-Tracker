@@ -1,8 +1,48 @@
 """Transaction webhook schemas for the mobile notification ingestion boundary."""
 
 from datetime import UTC, datetime
+from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+class CategoryEnum(str, Enum):
+    """Defines the only supported transaction categories for storage.
+
+    Attributes:
+        FOOD: Food purchases, cafes, groceries, and restaurants.
+        TRANSPORT: Transit, ride share, fuel, and parking charges.
+        ENTERTAINMENT: Media, events, subscriptions, and leisure purchases.
+        BILLS: Recurring utilities, phone, insurance, and fixed obligations.
+        SHOPPING: Retail, ecommerce, and discretionary goods purchases.
+        INCOME: Deposits, payroll, refunds, and other inbound money events.
+        MISCELLANEOUS: Transactions that do not confidently fit another bucket.
+    """
+
+    FOOD = "Food"
+    TRANSPORT = "Transport"
+    ENTERTAINMENT = "Entertainment"
+    BILLS = "Bills"
+    SHOPPING = "Shopping"
+    INCOME = "Income"
+    MISCELLANEOUS = "Miscellaneous"
+
+
+class CleanTransaction(BaseModel):
+    """Represents a normalized transaction extracted from raw notification text.
+
+    Attributes:
+        merchant_name: Human-readable merchant name with branch codes and noisy
+            payment processor fragments removed.
+        amount: Positive transaction amount in localized dollar units.
+        category: Strict transaction category selected from CategoryEnum.
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    merchant_name: str = Field(min_length=1)
+    amount: float = Field(gt=0)
+    category: CategoryEnum
 
 
 class TransactionWebhook(BaseModel):

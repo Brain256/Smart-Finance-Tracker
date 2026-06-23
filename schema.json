@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Smart Finance Tracker Data Contracts",
+  "schemas": {
+    "CategoryEnum": {
+      "description": "Defines the only supported transaction categories for storage.\n\nAttributes:\n    FOOD: Food purchases, cafes, groceries, and restaurants.\n    TRANSPORT: Transit, ride share, fuel, and parking charges.\n    ENTERTAINMENT: Media, events, subscriptions, and leisure purchases.\n    BILLS: Recurring utilities, phone, insurance, and fixed obligations.\n    SHOPPING: Retail, ecommerce, and discretionary goods purchases.\n    INCOME: Deposits, payroll, refunds, and other inbound money events.\n    MISCELLANEOUS: Transactions that do not confidently fit another bucket.",
+      "enum": [
+        "Food",
+        "Transport",
+        "Entertainment",
+        "Bills",
+        "Shopping",
+        "Income",
+        "Miscellaneous"
+      ],
+      "title": "CategoryEnum",
+      "type": "string"
+    },
+    "CleanTransaction": {
+      "$defs": {
+        "CategoryEnum": {
+          "description": "Defines the only supported transaction categories for storage.\n\nAttributes:\n    FOOD: Food purchases, cafes, groceries, and restaurants.\n    TRANSPORT: Transit, ride share, fuel, and parking charges.\n    ENTERTAINMENT: Media, events, subscriptions, and leisure purchases.\n    BILLS: Recurring utilities, phone, insurance, and fixed obligations.\n    SHOPPING: Retail, ecommerce, and discretionary goods purchases.\n    INCOME: Deposits, payroll, refunds, and other inbound money events.\n    MISCELLANEOUS: Transactions that do not confidently fit another bucket.",
+          "enum": [
+            "Food",
+            "Transport",
+            "Entertainment",
+            "Bills",
+            "Shopping",
+            "Income",
+            "Miscellaneous"
+          ],
+          "title": "CategoryEnum",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Represents a normalized transaction extracted from raw notification text.\n\nAttributes:\n    merchant_name: Human-readable merchant name with branch codes and noisy\n        payment processor fragments removed.\n    amount: Positive transaction amount in localized dollar units.\n    category: Strict transaction category selected from CategoryEnum.",
+      "properties": {
+        "merchant_name": {
+          "minLength": 1,
+          "title": "Merchant Name",
+          "type": "string"
+        },
+        "amount": {
+          "exclusiveMinimum": 0,
+          "title": "Amount",
+          "type": "number"
+        },
+        "category": {
+          "$ref": "#/$defs/CategoryEnum"
+        }
+      },
+      "required": [
+        "merchant_name",
+        "amount",
+        "category"
+      ],
+      "title": "CleanTransaction",
+      "type": "object"
+    },
+    "TransactionWebhook": {
+      "additionalProperties": false,
+      "description": "Represents the exact inbound payload sent from MacroDroid.\n\nAttributes:\n    notification_text: Raw notification body captured from the Android BMO\n        notification.\n    timestamp: Timestamp attached to the captured notification. Accepts ISO\n        8601 datetimes, Unix seconds, or Unix milliseconds.\n\nRaises:\n    ValueError: If timestamp is not timezone-aware or cannot be normalized.",
+      "properties": {
+        "notification_text": {
+          "minLength": 1,
+          "title": "Notification Text",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        }
+      },
+      "required": [
+        "notification_text",
+        "timestamp"
+      ],
+      "title": "TransactionWebhook",
+      "type": "object"
+    }
+  }
+}

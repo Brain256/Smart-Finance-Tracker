@@ -1,10 +1,9 @@
 # Smart Finance Tracker
 
-Smart Finance Tracker is a FastAPI ingestion gateway for banking push
-notifications. In Phase 1, the API accepts authenticated MacroDroid webhook
-payloads, validates their shape with Pydantic, and returns an acceptance
-response. Later phases will add AI extraction, Supabase persistence, and a
-dashboard.
+Smart Finance Tracker is a FastAPI ingestion pipeline for banking push
+notifications. It accepts authenticated MacroDroid webhook payloads, validates
+their shape with Pydantic, extracts clean transaction data through an
+Instructor/Groq AI layer, and stores idempotent records in Supabase Postgres.
 
 ## Current Functionality
 
@@ -21,7 +20,26 @@ dashboard.
     ```
   - `timestamp` may be an ISO 8601 datetime, a Unix timestamp in seconds, or a
     Unix timestamp in milliseconds.
-  - Returns HTTP `202 Accepted` when the token and payload are valid.
+  - Extracts a `merchant_name`, `amount`, and strict `category`.
+  - Upserts the clean transaction into Supabase table `expenses`.
+  - Returns HTTP `202 Accepted` when a transaction is processed and stored.
+  - Returns HTTP `200 OK` if a duplicate transaction collision is treated as a
+    successful retry.
+  - Logs extracted transaction JSON in the Uvicorn server terminal.
+
+Successful response shape:
+
+```json
+{
+  "status": "accepted",
+  "timestamp": "2026-06-17T20:55:00Z",
+  "transaction": {
+    "merchant_name": "Tim Hortons",
+    "amount": 14.5,
+    "category": "Food"
+  }
+}
+```
 
 ## Local Setup
 
@@ -54,7 +72,48 @@ Paste that value into `.env`:
 
 ```text
 INBOUND_SECRET_TOKEN=your-generated-token
+GROQ_API_KEY=your-groq-api-key
+GROQ_MODEL=llama-3.3-70b-versatile
+SUPABASE_URL=https://your-project-ref.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 ```
+
+`GROQ_MODEL` is optional; the app defaults to `llama-3.3-70b-versatile`.
+
+## Supabase Setup
+
+Create a Supabase project, then configure the `expenses` table.
+
+1. Open your Supabase project dashboard.
+2. Go to **SQL Editor**.
+3. Run the SQL in [supabase/expenses.sql](supabase/expenses.sql):
+
+```sql
+create table if not exists public.expenses (
+  id bigserial primary key,
+  created_at timestamptz not null default now(),
+  merchant_name varchar not null,
+  amount numeric(10, 2) not null,
+  category varchar not null,
+  timestamp timestamptz not null,
+  constraint unique_transaction_signature unique (
+    merchant_name,
+    amount,
+    timestamp
+  )
+);
+```
+
+4. Go to **Project Settings -> API**.
+5. Copy the **Project URL** into `.env` as `SUPABASE_URL`.
+6. Copy the **service_role** key into `.env` as
+   `SUPABASE_SERVICE_ROLE_KEY`.
+
+Keep the service role key private. It bypasses row-level security and should
+only be used by this backend server, never by a frontend client or MacroDroid.
+
+The unique constraint on `(merchant_name, amount, timestamp)` is what makes
+phone retry delivery idempotent.
 
 Start the API locally:
 
@@ -86,7 +145,7 @@ addresses point back to the phone, not your computer.
 
 ## Automated Tests
 
-Run the Phase 1 regression suite:
+Run the regression suite:
 
 ```powershell
 python -m pytest
@@ -95,12 +154,46 @@ python -m pytest
 Expected result:
 
 ```text
-6 passed
+18 passed
 ```
 
 The suite verifies health checks, bearer-token rejection, invalid payload
-rejection, timezone validation, Unix timestamp normalization, and valid
-ingestion acceptance.
+rejection, timezone validation, Unix timestamp normalization, AI extraction
+service calls, DTO validation, Supabase upsert payloads, duplicate collision
+handling, and valid ingestion acceptance.
+
+The automated tests mock Groq and Supabase, so they do not require network
+access or real API keys.
+
+## Manual Local Verification
+
+Start the API:
+
+```powershell
+python -m uvicorn api.index:app --reload
+```
+
+Send a test request:
+
+```powershell
+Invoke-RestMethod `
+  -Uri "http://127.0.0.1:8000/api/v1/ingest" `
+  -Method Post `
+  -Headers @{ Authorization = "Bearer YOUR_INBOUND_SECRET_TOKEN" } `
+  -ContentType "application/json" `
+  -Body '{
+    "notification_text": "BMO Credit Card: Approved $14.50 at TIM HORTONS #4920",
+    "timestamp": "2026-06-17T20:55:00Z"
+  }'
+```
+
+The Uvicorn terminal should log a normalized transaction:
+
+```text
+Extracted transaction: {"merchant_name":"Tim Hortons","amount":14.5,"category":"Food"}
+```
+
+Then open Supabase **Table Editor -> expenses** and confirm a row was inserted.
 
 ## MacroDroid Setup
 
@@ -238,12 +331,17 @@ message you expect.
 ### 6. Confirm The End-To-End Result
 
 When MacroDroid sends a valid request, the API should respond with HTTP
-`202 Accepted`:
+`202 Accepted` for a newly stored transaction, or `200 OK` for a duplicate retry:
 
 ```json
 {
   "status": "accepted",
-  "timestamp": "2026-06-21T16:00:37.417000Z"
+  "timestamp": "2026-06-21T16:00:37.417000Z",
+  "transaction": {
+    "merchant_name": "Tim Hortons",
+    "amount": 14.5,
+    "category": "Food"
+  }
 }
 ```
 
@@ -251,6 +349,7 @@ If it fails:
 
 - HTTP `401` means the bearer token is missing or wrong.
 - HTTP `422` means the JSON body does not match the required schema.
+- HTTP `500` usually means Groq or Supabase configuration is missing or invalid.
 - A connection error usually means the phone cannot reach the server URL.
 
 For local testing, make sure:
@@ -259,3 +358,5 @@ For local testing, make sure:
 - Uvicorn is running with `--host 0.0.0.0`.
 - Windows Firewall allows the Python/Uvicorn process.
 - MacroDroid is using the computer's LAN IP, not `localhost`.
+- `.env` contains valid `GROQ_API_KEY`, `SUPABASE_URL`, and
+  `SUPABASE_SERVICE_ROLE_KEY` values.
