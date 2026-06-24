@@ -45,8 +45,8 @@ async def ingest_transaction_notification(
     """Extracts a structured transaction from a signed banking notification.
 
     Args:
-        payload: The exact MacroDroid webhook payload containing notification text
-            and the original notification timestamp.
+        payload: The exact MacroDroid webhook payload containing notification
+            title, notification text, and the original notification timestamp.
         response: Mutable FastAPI response used to mark duplicate retries as OK.
         _verified_token: Dependency marker confirming the caller supplied the
             configured pre-shared bearer token.
@@ -54,7 +54,10 @@ async def ingest_transaction_notification(
     Returns:
         An IngestAcceptedResponse containing the normalized extracted transaction.
     """
-    clean_transaction = await extract_transaction_entities(payload.notification_text)
+    clean_transaction = await extract_transaction_entities(
+        payload.notification_title,
+        payload.notification_text,
+    )
     log.info("Extracted transaction: %s", clean_transaction.model_dump_json())
     persistence_status = await upsert_expense_transaction(
         clean_transaction,

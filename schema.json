@@ -60,8 +60,13 @@
     },
     "TransactionWebhook": {
       "additionalProperties": false,
-      "description": "Represents the exact inbound payload sent from MacroDroid.\n\nAttributes:\n    notification_text: Raw notification body captured from the Android BMO\n        notification.\n    timestamp: Timestamp attached to the captured notification. Accepts ISO\n        8601 datetimes, Unix seconds, or Unix milliseconds.\n\nRaises:\n    ValueError: If timestamp is not timezone-aware or cannot be normalized.",
+      "description": "Represents the exact inbound payload sent from MacroDroid.\n\nAttributes:\n    notification_title: Raw notification title captured from the Android BMO\n        notification, expected to contain the establishment name.\n    notification_text: Raw notification body captured from the Android BMO\n        notification, expected to contain the card and amount details.\n    timestamp: Timestamp attached to the captured notification. Accepts ISO\n        8601 datetimes, Unix seconds, or Unix milliseconds.\n\nRaises:\n    ValueError: If timestamp is not timezone-aware or cannot be normalized.",
       "properties": {
+        "notification_title": {
+          "minLength": 1,
+          "title": "Notification Title",
+          "type": "string"
+        },
         "notification_text": {
           "minLength": 1,
           "title": "Notification Text",
@@ -74,6 +79,7 @@
         }
       },
       "required": [
+        "notification_title",
         "notification_text",
         "timestamp"
       ],

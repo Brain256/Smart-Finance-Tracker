@@ -49,8 +49,10 @@ class TransactionWebhook(BaseModel):
     """Represents the exact inbound payload sent from MacroDroid.
 
     Attributes:
+        notification_title: Raw notification title captured from the Android BMO
+            notification, expected to contain the establishment name.
         notification_text: Raw notification body captured from the Android BMO
-            notification.
+            notification, expected to contain the card and amount details.
         timestamp: Timestamp attached to the captured notification. Accepts ISO
             8601 datetimes, Unix seconds, or Unix milliseconds.
 
@@ -60,6 +62,7 @@ class TransactionWebhook(BaseModel):
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
+    notification_title: str = Field(min_length=1)
     notification_text: str = Field(min_length=1)
     timestamp: datetime
 

@@ -16,14 +16,16 @@ DEFAULT_GROQ_MODEL: Final[str] = "llama-3.3-70b-versatile"
 
 SYSTEM_PROMPT: Final[str] = """
 You are a strict banking notification compiler for a personal finance tracker.
-Extract only one transaction from the raw mobile banking notification.
+Extract only one transaction from the mobile banking notification title/body.
 
 Rules:
 - Return data matching the requested schema exactly.
-- Normalize merchant_name into a clean title-cased merchant brand or payer name.
+- Use the notification title as the source of truth for merchant_name.
+- Normalize the title into a clean title-cased merchant brand or payer name.
+- Use the notification body as the source of truth for amount.
 - Remove store numbers, terminal IDs, approval words, card names, dates, and cities.
 - Convert merchant examples like "TIM HORTONS #4920" to "Tim Hortons".
-- Use the absolute dollar value shown in the notification for amount.
+- Use the absolute dollar value shown in the notification body for amount.
 - Select exactly one category from the allowed enum values.
 - Use "Income" only for deposits, payroll, refunds, credits, or received funds.
 - Use "Miscellaneous" when the merchant or category is genuinely ambiguous.
@@ -62,26 +64,44 @@ def _get_model_name() -> str:
     return os.getenv("GROQ_MODEL", DEFAULT_GROQ_MODEL)
 
 
-def _build_extraction_messages(raw_text: str) -> list[ChatCompletionMessageParam]:
+def _build_extraction_messages(
+    notification_title: str,
+    notification_text: str,
+) -> list[ChatCompletionMessageParam]:
     """Creates the chat messages used by the entity extraction model.
 
     Args:
-        raw_text: Unstructured mobile banking notification text.
+        notification_title: Mobile banking notification title containing the
+            establishment name.
+        notification_text: Mobile banking notification body containing card and
+            amount details.
 
     Returns:
         A list of chat messages ready for the OpenAI-compatible API.
     """
+    user_content = "\n".join(
+        [
+            f"Notification title: {notification_title}",
+            f"Notification body: {notification_text}",
+        ]
+    )
+
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": raw_text},
+        {"role": "user", "content": user_content},
     ]
 
 
-async def extract_transaction_entities(raw_text: str) -> CleanTransaction:
-    """Extracts normalized transaction entities from raw notification text.
+async def extract_transaction_entities(
+    notification_title: str,
+    notification_text: str,
+) -> CleanTransaction:
+    """Extracts normalized transaction entities from notification title/body.
 
     Args:
-        raw_text: Unstructured mobile banking notification text captured from
+        notification_title: Mobile banking notification title captured from
+            MacroDroid.
+        notification_text: Mobile banking notification body captured from
             MacroDroid.
 
     Returns:
@@ -96,7 +116,7 @@ async def extract_transaction_entities(raw_text: str) -> CleanTransaction:
     return await client.chat.completions.create(
         model=_get_model_name(),
         response_model=CleanTransaction,
-        messages=_build_extraction_messages(raw_text),
+        messages=_build_extraction_messages(notification_title, notification_text),
         temperature=0,
         max_retries=2,
     )

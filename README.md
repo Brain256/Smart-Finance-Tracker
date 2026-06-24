@@ -14,7 +14,8 @@ Instructor/Groq AI layer, and stores idempotent records in Supabase Postgres.
   - Accepts this payload shape:
     ```json
     {
-      "notification_text": "BMO Credit Card: Approved $14.50 at Tim Hortons",
+      "notification_title": "Tim Hortons",
+      "notification_text": "BMO Credit Card ending in 1234: Approved $14.50",
       "timestamp": "1782057637417"
     }
     ```
@@ -182,7 +183,8 @@ Invoke-RestMethod `
   -Headers @{ Authorization = "Bearer YOUR_INBOUND_SECRET_TOKEN" } `
   -ContentType "application/json" `
   -Body '{
-    "notification_text": "BMO Credit Card: Approved $14.50 at TIM HORTONS #4920",
+    "notification_title": "TIM HORTONS #4920",
+    "notification_text": "BMO Credit Card ending in 1234: Approved $14.50",
     "timestamp": "2026-06-17T20:55:00Z"
   }'
 ```
@@ -206,10 +208,12 @@ On your Android phone:
 3. In Android settings, allow notifications from BMO.
 4. Confirm a real transaction notification appears on the phone.
 
-The notification should contain useful transaction text, such as:
+The notification title should contain the establishment, and the body should
+contain the card and amount details, such as:
 
 ```text
-BMO Credit Card: Approved $14.50 at Tim Hortons
+Title: Tim Hortons
+Body: BMO Credit Card ending in 1234: Approved $14.50
 ```
 
 ### 2. Give MacroDroid Notification Access
@@ -281,10 +285,16 @@ Set the request body to JSON:
 
 ```json
 {
+  "notification_title": "[not_title]",
   "notification_text": "[not_text]",
   "timestamp": "[not_timestamp]"
 }
 ```
+
+Use MacroDroid's **Magic Text** picker to replace `[not_title]` with the actual
+notification title variable for your version of MacroDroid. The exact name may
+be shown as notification title, notification app title, notification subject, or
+similar.
 
 Use MacroDroid's **Magic Text** picker to replace `[not_text]` with the actual
 notification body variable for your version of MacroDroid. The exact name may be
@@ -318,15 +328,16 @@ Add a temporary MacroDroid action before the HTTP request:
 Actions -> Device Actions -> Display Notification
 ```
 
-Set the debug notification body to the same notification magic text you plan to
-send:
+Set the debug notification body to the same notification magic text values you
+plan to send:
 
 ```text
-Captured: [not_text]
+Captured title: [not_title]
+Captured body: [not_text]
 ```
 
-Trigger the macro and confirm the displayed text contains the transaction
-message you expect.
+Trigger the macro and confirm the displayed title contains the establishment and
+the displayed body contains the transaction amount.
 
 ### 6. Confirm The End-To-End Result
 

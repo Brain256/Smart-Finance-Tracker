@@ -25,14 +25,19 @@
 When writing new modules or endpoints, you must adhere to this exact structural block layout:
 
 ```python
-def parse_notification_payload(raw_text: str, received_at: datetime) -> CleanTransaction:
-    """Parses an unstructured banking text string into a type-safe transaction layout.
+def parse_notification_payload(
+    notification_title: str,
+    notification_text: str,
+    received_at: datetime,
+) -> CleanTransaction:
+    """Parses banking notification fields into a type-safe transaction layout.
 
     This function utilizes our AI parsing layer to isolate core entity targets 
     from erratic mobile push strings.
 
     Args:
-        raw_text: The unmodified body text passed from the mobile push notification.
+        notification_title: The unmodified title passed from the mobile push notification.
+        notification_text: The unmodified body text passed from the mobile push notification.
         received_at: The precise ISO timestamp tracking when the webhook resolved.
 
     Returns:

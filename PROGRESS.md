@@ -25,6 +25,7 @@
   - Added POST `/api/v1/ingest` protected with `Depends(verify_api_key)`.
   - Target Path: `src/schemas/transaction.py`
   - Added strict Pydantic v2 `TransactionWebhook` schema matching the inbound contract exactly:
+    - `notification_title: str`
     - `notification_text: str`
     - `timestamp: datetime`
   - Accepted ISO 8601 timestamps plus MacroDroid Unix timestamps in seconds or milliseconds, normalized internally to timezone-aware UTC datetimes.
@@ -101,6 +102,7 @@
    Use a JSON body matching the exact inbound schema:
    ```json
    {
+     "notification_title": "[not_title]",
      "notification_text": "[not_text]",
      "timestamp": "[not_timestamp]"
    }
@@ -116,8 +118,8 @@
 - [x] **2.3 Build Async AI Client Wrapper with Instructor Layer Integration**
   - Target Path: `src/services/ai_extractor.py`
   - Patch an async OpenAI/Groq or Google client wrapper instance using `instructor.from_openai()` or `instructor.from_gemini()`.
-  - Implement `async def extract_transaction_entities(raw_text: str) -> CleanTransaction:` executing structural tool completion calls.
-  - Hardcode strict linguistic compiler system instructions ensuring merchant names are cleanly normalized (e.g., mapping `"TIM HORTONS #4920"` cleanly to `"Tim Hortons"`).
+  - Implement `async def extract_transaction_entities(notification_title: str, notification_text: str) -> CleanTransaction:` executing structural tool completion calls.
+  - Hardcode strict linguistic compiler system instructions ensuring merchant names are cleanly normalized from the notification title (e.g., mapping `"TIM HORTONS #4920"` cleanly to `"Tim Hortons"`) and amounts are taken from the notification body.
 - [x] **2.4 Add Automated Extraction Regression Tests**
   - Target Path: `tests/test_ai_extractor.py`
   - Target Path: `tests/test_transaction_schemas.py`
@@ -135,7 +137,7 @@
   - Instantiate an async-capable Supabase client connection hook pool utilizing the environment URL and service role execution credentials.
 - [x] **3.3 Connect Ingestion Handlers to Database Operations with Exception Trapping**
   - Target Path: `api/index.py`
-  - Process inbound notification strings through the `ai_extractor` service layer.
+  - Process inbound notification title/body fields through the `ai_extractor` service layer.
   - Execute a Supabase `.upsert()` operation targeting the clean transaction record.
   - Implement an implicit try/except structure: if an integrity exception hits due to duplicate composite signature block violations, suppress the failure quietly and return an HTTP `200 OK` status back to the smartphone client application.
 - [x] **3.4 Add Persistent Data Layer Regression Tests**

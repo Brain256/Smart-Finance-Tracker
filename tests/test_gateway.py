@@ -31,27 +31,31 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
 
 
 @pytest.fixture(autouse=True)
-def extractor_stub(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+def extractor_stub(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str]]:
     """Replaces the network AI extractor with a deterministic fake.
 
     Args:
         monkeypatch: Pytest fixture used to swap the endpoint dependency.
 
     Returns:
-        The list of raw notification texts passed into the fake extractor.
+        The list of notification title/body pairs passed into the fake extractor.
     """
-    captured_texts: list[str] = []
+    captured_notifications: list[tuple[str, str]] = []
 
-    async def fake_extract_transaction_entities(raw_text: str) -> CleanTransaction:
+    async def fake_extract_transaction_entities(
+        notification_title: str,
+        notification_text: str,
+    ) -> CleanTransaction:
         """Returns a fixed clean transaction for gateway integration tests.
 
         Args:
-            raw_text: Raw notification text forwarded by the endpoint.
+            notification_title: Raw notification title forwarded by the endpoint.
+            notification_text: Raw notification body forwarded by the endpoint.
 
         Returns:
             A CleanTransaction object suitable for response serialization.
         """
-        captured_texts.append(raw_text)
+        captured_notifications.append((notification_title, notification_text))
 
         return CleanTransaction(
             merchant_name="Tim Hortons",
@@ -65,7 +69,7 @@ def extractor_stub(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         fake_extract_transaction_entities,
     )
 
-    return captured_texts
+    return captured_notifications
 
 
 @pytest.fixture(autouse=True)
@@ -113,7 +117,8 @@ def valid_payload() -> dict[str, str]:
         A JSON-serializable payload matching the inbound ingestion contract.
     """
     return {
-        "notification_text": "BMO Credit Card: Approved $14.50 at Tim Hortons",
+        "notification_title": "Tim Hortons",
+        "notification_text": "BMO Credit Card ending in 1234: Approved $14.50",
         "timestamp": "2026-06-17T20:55:00Z",
     }
 
@@ -290,14 +295,14 @@ def test_ingest_accepts_macrodroid_second_timestamp(client: TestClient) -> None:
 
 def test_ingest_accepts_valid_macrodroid_payload(
     client: TestClient,
-    extractor_stub: list[str],
+    extractor_stub: list[tuple[str, str]],
     persistence_stub: list[tuple[str, str]],
 ) -> None:
     """Verifies valid signed MacroDroid-shaped payloads pass the gate.
 
     Args:
         client: FastAPI test client configured for the application.
-        extractor_stub: Captured raw text values sent to the fake extractor.
+        extractor_stub: Captured title/body values sent to the fake extractor.
         persistence_stub: Captured records sent to the fake persistence layer.
 
     Returns:
@@ -313,7 +318,9 @@ def test_ingest_accepts_valid_macrodroid_payload(
 
     assert response.status_code == 202
     assert response.json() == expected_ingest_response("2026-06-17T20:55:00Z")
-    assert extractor_stub == [payload["notification_text"]]
+    assert extractor_stub == [
+        (payload["notification_title"], payload["notification_text"])
+    ]
     assert persistence_stub == [("Tim Hortons", "2026-06-17 20:55:00+00:00")]
 
 

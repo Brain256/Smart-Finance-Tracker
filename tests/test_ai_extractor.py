@@ -119,7 +119,8 @@ def test_extract_transaction_entities_requests_clean_transaction(
 
     transaction = asyncio.run(
         ai_extractor.extract_transaction_entities(
-            "BMO Credit Card: Approved $14.50 at TIM HORTONS #4920"
+            "TIM HORTONS #4920",
+            "BMO Credit Card ending in 1234: Approved $14.50",
         )
     )
 
@@ -139,8 +140,12 @@ def test_extract_transaction_entities_requests_clean_transaction(
     messages = call["messages"]
     assert isinstance(messages, list)
     assert messages[0]["role"] == "system"
-    assert "TIM HORTONS #4920" in str(messages[0]["content"])
+    assert "notification title as the source of truth" in str(messages[0]["content"])
+    assert "notification body as the source of truth" in str(messages[0]["content"])
     assert messages[1] == {
         "role": "user",
-        "content": "BMO Credit Card: Approved $14.50 at TIM HORTONS #4920",
+        "content": (
+            "Notification title: TIM HORTONS #4920\n"
+            "Notification body: BMO Credit Card ending in 1234: Approved $14.50"
+        ),
     }

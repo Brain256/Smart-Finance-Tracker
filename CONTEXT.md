@@ -14,7 +14,7 @@ The entire lifecycle of a transaction execution maps out through four clear arch
 ### Phase 1: Mobile Interception (Android Hardware)
 - **Source:** User makes a purchase using a physical BMO Credit or Debit Card. 
 - **Trigger:** The BMO Mobile App pushes a native notification to the Android OS banner system.
-- **Capture:** MacroDroid detects the notification event, extracts the raw string text content body, and initiates an asynchronous HTTP POST request to the cloud gateway.
+- **Capture:** MacroDroid detects the notification event, extracts the notification title and body text, and initiates an asynchronous HTTP POST request to the cloud gateway.
 
 ### Phase 2: Gateway Ingest & Security Gate (FastAPI Serverless)
 - **Endpoint:** Hosted publicly at `/api/v1/ingest` via Vercel Serverless.
@@ -22,10 +22,10 @@ The entire lifecycle of a transaction execution maps out through four clear arch
 - **Validation:** Raw JSON is immediately dropped into a Pydantic v2 engine to assert format conformity, dropping broken or malicious data blobs before processing.
 
 ### Phase 3: AI Inference & Entity Normalization (Groq LPU Engine)
-- **Transmission:** The FastAPI server packages the unstructured text string and streams it via an OpenAI-compatible SDK call to Groq's high-speed Llama-3 compiler instances.
+- **Transmission:** The FastAPI server packages the notification title/body pair and streams it via an OpenAI-compatible SDK call to Groq's high-speed Llama-3 compiler instances.
 - **Extraction:** The AI forces structured JSON mapping using the `instructor` library to output strict schemas:
-  - `merchant_name`: Normalized string (e.g., "Tim Hortons", not "TIM HORTONS #4920").
-  - `amount`: Floating numeric value representing the localized dollar amount.
+  - `merchant_name`: Normalized string from the notification title (e.g., "Tim Hortons", not "TIM HORTONS #4920").
+  - `amount`: Floating numeric value representing the localized dollar amount from the notification body.
   - `category`: Strict categorical value matched directly to a predefined system enum.
 
 ### Phase 4: Storage Tier Commit (Supabase PostgreSQL)
@@ -42,7 +42,8 @@ Codex must strictly follow these schemas when building inputs and outputs. No va
 ### Inbound Ingestion Payload (From Phone to Webhook)
 ```json
 {
-  "notification_text": "BMO Credit Card: Approved $14.50 at Tim Hortons",
+  "notification_title": "Tim Hortons",
+  "notification_text": "BMO Credit Card ending in 1234: Approved $14.50",
   "timestamp": "1782057637417"
 }
 ```
