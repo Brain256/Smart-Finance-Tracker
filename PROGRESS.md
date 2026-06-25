@@ -146,18 +146,102 @@
   - Verified with `python -m pytest`: `18 passed, 1 warning`.
 
 ## Phase 4: UI Dashboard & Frontend Presentation Tier
-- [ ] **4.1 Spin Up Next.js Workspace Architecture**
+- [x] **4.1 Spin Up Next.js Workspace Architecture**
   - Initialize a Next.js workspace folder layout at the root repository directory layer using Tailwind CSS configuration bindings.
-  - Run the `npx shadcn-ui@latest init` boilerplate framework compilation utility.
-- [ ] **4.2 Configure Supabase Authentication Layer Isolation**
-  - Enable Email/Password registration methods inside the active Supabase project management pane.
-  - **Security Mandate:** Toggle user registration visibility to administrative-invite only to explicitly prevent outside access vector exploits.
-  - Generate a secure `/login` intercept page mapping credential input parameters straight into Supabase token handling endpoints.
-- [ ] **4.3 Write Next.js Server-Side Security Protection Middleware**
-  - Target Path: `middleware.ts` (Project root directory)
-  - Intercept server-side page requests targeting protected layout routes like `/dashboard`.
-  - Query cookies to verify valid session tokens. Redirect unauthenticated requests back to the login gateway routing target.
-- [ ] **4.4 Assemble Visual Budget Metric UI Dashboards**
-  - Install charts styling modules (`npx shadcn-ui@latest add card` and charting primitives).
-  - Write clean server components querying database aggregates directly from the Supabase database.
-  - Bind data maps into clear graphical rendering components breaking down current spend cycles by category allocations.
+  - Added a root-level Next.js App Router workspace with Tailwind CSS configuration bindings.
+  - Used local dashboard-oriented UI primitives instead of generated shadcn files to avoid introducing interactive scaffold output into the repo.
+  - Use the App Router and create a protected `/dashboard` experience as the primary application surface.
+  - Keep the first screen focused on the real finance dashboard rather than a marketing landing page.
+  - Use a responsive shell that works well on desktop web and phone widths:
+    - Desktop: persistent top navigation or compact sidebar, multi-column dashboard grids, and wide data tables.
+    - Mobile: single-column sections, horizontally scrollable tables where necessary, touch-friendly tabs and sort controls, and no overlapping text.
+- [x] **4.2 Configure Dashboard Authentication Layer**
+  - Replaced Supabase email/password auth and custom credential auth with Auth.js Google OAuth for this personal dashboard.
+  - Added `AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, and `AUTH_ALLOWED_EMAIL` placeholders while keeping `SUPABASE_SERVICE_ROLE_KEY` server-only.
+- [x] **4.3 Write Next.js Security Middleware**
+  - Target Path: `proxy.ts` (Project root directory)
+  - Guard all non-API, non-static asset routes.
+  - Validate the Auth.js session at the edge and redirect unauthenticated page requests to `/login`.
+- [x] **4.4 Assemble Visual Budget Metric UI Dashboards**
+  - Installed charting and icon dependencies through the frontend package manifest.
+  - Wrote clean server components querying database records directly from the Supabase database.
+  - Bound data maps into clear graphical rendering components breaking down current spend cycles by category allocations.
+  - Build summary statistic tiles for:
+    - **Spending Today:** Sum of all non-income expense transactions whose `timestamp` falls on the current local day.
+    - **Spending This Week:** Sum of all non-income expense transactions for the current week.
+    - **Spending This Month:** Sum of all non-income expense transactions for the current calendar month.
+  - Each statistic tile should include:
+    - Currency-formatted spend total.
+    - Short period label.
+    - Optional supporting comparison text once historical comparison data exists.
+  - Exclude `Income` category rows from spending totals unless the dashboard explicitly introduces a separate income metric later.
+- [x] **4.5 Build Calendar Spending History Tab**
+  - Add a dashboard tab named `Calendar`.
+  - Display a month calendar grid for the selected month.
+  - Each day cell must show:
+    - Day number.
+    - Total amount spent on that day.
+    - A visual intensity cue based on daily spend size so high-spend days are easy to scan.
+  - Provide month navigation controls for previous and next month.
+  - Use the transaction `timestamp` as the source of truth for day grouping.
+  - Empty days should remain visible with a zero or muted empty state so the calendar shape remains stable.
+  - Mobile behavior:
+    - Calendar must fit phone width without text collisions.
+    - Day cells should maintain stable square or near-square dimensions.
+    - Daily amount text may use compact currency formatting when space is tight.
+- [x] **4.6 Build Sortable Transaction Table Tab**
+  - Add a dashboard tab named `Transactions`.
+  - Render every stored transaction in a clean table with these columns:
+    - Date/time from `timestamp`.
+    - Merchant from `merchant_name`.
+    - Category from `category`.
+    - Amount from `amount`.
+  - Each column header must expose a sort control.
+  - Sorting requirements:
+    - Clicking a sortable header toggles ascending and descending order for that column.
+    - The active sort column should be visually indicated.
+    - Date defaults to newest first.
+    - Amount sorting must compare numeric values, not currency-formatted strings.
+    - Merchant and category sorting should be alphabetical.
+  - Table should remain readable on mobile:
+    - Prefer horizontal scrolling inside the table region rather than squeezing text until it overlaps.
+    - Keep header controls touch-friendly.
+    - Use compact row spacing on narrow screens while preserving legibility.
+- [x] **4.7 Build Spending By Location Pie Chart**
+  - Add a chart section for spending grouped by location.
+  - Initial data source can use `merchant_name` as the location-like grouping key because the current persisted schema does not yet include a separate physical location field.
+  - If true location data is added later, migrate this chart to group by the dedicated location field.
+  - Show top locations by total spend and group small remaining values into an `Other` slice if the chart becomes crowded.
+  - Include a legend that remains usable on mobile.
+- [x] **4.8 Build Spending By Category Pie Chart**
+  - Add a chart section for spending grouped by `category`.
+  - Category slices must use the existing enum categories:
+    - `Food`
+    - `Transport`
+    - `Entertainment`
+    - `Bills`
+    - `Shopping`
+    - `Income`
+    - `Miscellaneous`
+  - For spending-only views, exclude or visually separate `Income` so income does not distort expense allocations.
+  - Include tooltip or hover/tap details showing category name, total amount, and percentage of visible spend.
+- [x] **4.9 Dashboard Data Query Contract**
+  - Use Supabase as the dashboard data source.
+  - Expected table: `expenses`.
+  - Required fields for the first dashboard version:
+    - `id`
+    - `created_at`
+    - `merchant_name`
+    - `amount`
+    - `category`
+    - `timestamp`
+  - Query all records needed for the selected dashboard period and derive UI aggregates from those records unless a dedicated SQL view or RPC is introduced.
+  - Currency display should default to Canadian dollars because the ingestion source is BMO card notifications.
+  - Date grouping should use the user's local timezone for dashboard presentation while preserving UTC storage semantics.
+- [ ] **4.10 Responsive Dashboard Acceptance Criteria**
+  - Desktop dashboard should show statistics, charts, calendar, and table with dense but calm spacing.
+  - Phone dashboard should stack sections vertically and keep primary actions reachable without horizontal page-level overflow.
+  - No text should overlap inside cards, table headers, chart legends, calendar cells, or navigation tabs.
+  - Charts must have stable heights and readable legends on both desktop and mobile.
+  - Calendar cells and table rows must not resize unpredictably when values change.
+  - Verify the finished UI at minimum desktop and mobile viewport sizes before considering Phase 4 complete.

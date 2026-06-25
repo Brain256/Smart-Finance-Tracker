@@ -1,0 +1,28 @@
+{
+  "name": "smart-finance-tracker-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "latest",
+    "lucide-react": "latest",
+    "next": "latest",
+    "next-auth": "^5.0.0-beta.31",
+    "react": "latest",
+    "react-dom": "latest",
+    "recharts": "latest"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "latest",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "tailwindcss": "latest",
+    "typescript": "latest"
+  }
+}

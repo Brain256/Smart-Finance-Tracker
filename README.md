@@ -27,6 +27,13 @@ Instructor/Groq AI layer, and stores idempotent records in Supabase Postgres.
   - Returns HTTP `200 OK` if a duplicate transaction collision is treated as a
     successful retry.
   - Logs extracted transaction JSON in the Uvicorn server terminal.
+- `GET /dashboard`
+  - Displays a private Next.js dashboard for stored Supabase transactions.
+  - Protected by Auth.js Google OAuth and an `AUTH_ALLOWED_EMAIL` allowlist.
+  - Shows spending totals for today, this week, and this month.
+  - Includes overview, calendar, and transactions tabs.
+  - Renders pie charts for spending by merchant/location and category.
+  - Provides sortable transaction columns for date, merchant, category, and amount.
 
 Successful response shape:
 
@@ -75,11 +82,40 @@ Paste that value into `.env`:
 INBOUND_SECRET_TOKEN=your-generated-token
 GROQ_API_KEY=your-groq-api-key
 GROQ_MODEL=llama-3.3-70b-versatile
+AUTH_SECRET=your-generated-auth-secret
+AUTH_GOOGLE_ID=your-google-oauth-client-id
+AUTH_GOOGLE_SECRET=your-google-oauth-client-secret
+AUTH_ALLOWED_EMAIL=your.email@gmail.com
 SUPABASE_URL=https://your-project-ref.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 ```
 
 `GROQ_MODEL` is optional; the app defaults to `llama-3.3-70b-versatile`.
+`AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, and
+`AUTH_ALLOWED_EMAIL` protect the dashboard login and should be set locally and
+in Vercel Project Settings. Generate `AUTH_SECRET` with:
+
+```powershell
+npx auth secret
+```
+
+In Google Cloud Console, configure this authorized redirect URI for production:
+
+```text
+https://your-vercel-domain.vercel.app/api/auth/callback/google
+```
+
+For local OAuth testing, add:
+
+```text
+http://localhost:3000/api/auth/callback/google
+```
+
+Install frontend dependencies:
+
+```powershell
+npm.cmd install
+```
 
 ## Supabase Setup
 
@@ -112,6 +148,7 @@ create table if not exists public.expenses (
 
 Keep the service role key private. It bypasses row-level security and should
 only be used by this backend server, never by a frontend client or MacroDroid.
+The Next.js dashboard uses that key only in server-side code.
 
 The unique constraint on `(merchant_name, amount, timestamp)` is what makes
 phone retry delivery idempotent.
@@ -173,6 +210,23 @@ Start the API:
 ```powershell
 python -m uvicorn api.index:app --reload
 ```
+
+Start the dashboard locally:
+
+```powershell
+npm.cmd run dev
+```
+
+Then open:
+
+```text
+http://localhost:3000/dashboard
+```
+
+If Supabase service credentials are not configured, the dashboard can still
+render with sample transactions for layout verification. `/dashboard` is
+protected by Google OAuth when `AUTH_SECRET`, `AUTH_GOOGLE_ID`,
+`AUTH_GOOGLE_SECRET`, and `AUTH_ALLOWED_EMAIL` are configured.
 
 Send a test request:
 
