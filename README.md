@@ -1,9 +1,14 @@
 # Smart Finance Tracker
 
 Smart Finance Tracker is a FastAPI ingestion pipeline for banking push
-notifications. It accepts authenticated MacroDroid webhook payloads, validates
-their shape with Pydantic, extracts clean transaction data through an
-Instructor/Groq AI layer, and stores idempotent records in Supabase Postgres.
+notifications. It accepts authenticated webhook payloads from a companion native
+Android client app (`AndroidClient/`), validates their shape with Pydantic,
+extracts clean transaction data through an Instructor/Groq AI layer, and stores
+idempotent records in Supabase Postgres.
+
+> **Note:** The capture layer is now the custom Android client in
+> [`AndroidClient/`](AndroidClient/). The previous MacroDroid-based setup is
+> deprecated and has been replaced — see [Android Client Setup](#android-client-setup).
 
 ## Current Functionality
 
@@ -147,8 +152,8 @@ create table if not exists public.expenses (
    `SUPABASE_SERVICE_ROLE_KEY`.
 
 Keep the service role key private. It bypasses row-level security and should
-only be used by this backend server, never by a frontend client or MacroDroid.
-The Next.js dashboard uses that key only in server-side code.
+only be used by this backend server, never by a frontend client or the Android
+app. The Next.js dashboard uses that key only in server-side code.
 
 The unique constraint on `(merchant_name, amount, timestamp)` is what makes
 phone retry delivery idempotent.
@@ -178,8 +183,8 @@ Use the IPv4 address on your Wi-Fi adapter, for example:
 http://192.168.1.25:8000/api/v1/ingest
 ```
 
-Do not use `127.0.0.1` or `localhost` from MacroDroid. On the phone, those
-addresses point back to the phone, not your computer.
+Do not use `127.0.0.1` or `localhost` from the Android client. On the phone,
+those addresses point back to the phone, not your computer.
 
 ## Automated Tests
 
@@ -251,177 +256,146 @@ Extracted transaction: {"merchant_name":"Tim Hortons","amount":14.5,"category":"
 
 Then open Supabase **Table Editor -> expenses** and confirm a row was inserted.
 
-## MacroDroid Setup
+## Android Client Setup
 
-### 1. Enable BMO Notifications
+The capture layer is a native Kotlin Android app in
+[`AndroidClient/`](AndroidClient/) that replaces MacroDroid. It:
 
-On your Android phone:
+- Runs a `NotificationListenerService` that reads posted notifications from your
+  bank/payment app.
+- Extracts the notification title, body, and timestamp and POSTs them to
+  `/api/v1/ingest` with the `Authorization: Bearer <token>` header.
+- On a failed POST (no internet, server error), caches the request in a local
+  SQLite (Room) table `failed_notifications`.
+- Retries cached requests automatically once connectivity is restored, via a
+  `WorkManager` job constrained to `NetworkType.CONNECTED`.
 
-1. Install and sign in to the BMO mobile app.
-2. Enable card transaction alerts inside the BMO app.
-3. In Android settings, allow notifications from BMO.
-4. Confirm a real transaction notification appears on the phone.
+Application id: `com.finance.androidclient`. Minimum Android version: API 26.
 
-The notification title should contain the establishment, and the body should
-contain the card and amount details, such as:
+### Architecture
 
-```text
-Title: Tim Hortons
-Body: BMO Credit Card ending in 1234: Approved $14.50
+```
+Bank/Wallet notification
+        │
+        ▼
+MyNotificationListenerService   (reads title + body + postTime)
+        │
+        ▼
+NetworkClient.sendNotification() ──► POST /api/v1/ingest  ──► 202/200  → done
+        │
+        └── failure (offline / 5xx) → Room cache (failed_notifications)
+                                       └► NotificationSyncWorker (CONNECTED)
+                                          drains the cache when internet returns
 ```
 
-### 2. Give MacroDroid Notification Access
+### 1. Enable Bank Notifications On The Phone
 
-On Android:
+1. Install and sign in to your bank/payment app (e.g. BMO, Google Wallet).
+2. Enable card transaction alerts inside that app.
+3. In Android settings, allow notifications from that app.
+4. Confirm a real transaction notification appears, for example:
 
-1. Open **Settings**.
-2. Search for **Notification access**.
-3. Enable notification access for **MacroDroid**.
-
-MacroDroid needs this permission so it can read the BMO notification title/body.
-
-### 3. Create The Macro
-
-In MacroDroid:
-
-1. Tap **Add Macro**.
-2. Add a trigger:
    ```text
-   Triggers -> Device Events -> Notification -> Notification Received
-   ```
-3. Select the BMO app as the notification source.
-4. If MacroDroid offers text filtering, start broad:
-   ```text
-   Contains: BMO
-   ```
-   or:
-   ```text
-   Contains: Approved
+   Title: Tim Hortons
+   Body: BMO Credit Card ending in 1234: Approved $14.50
    ```
 
-Keep the filter broad at first, then tighten it after you see the real BMO
-notification format.
+### 2. Choose Which App's Notifications To Forward
 
-### 4. Add The HTTP POST Action
+Open
+[`AndroidClient/app/src/main/java/com/finance/androidclient/service/MyNotificationListenerService.kt`](AndroidClient/app/src/main/java/com/finance/androidclient/service/MyNotificationListenerService.kt)
+and edit the `allowedPackages` set to include your bank app's package name:
 
-Add an action:
-
-```text
-Actions -> Web Interactions -> HTTP Request
+```kotlin
+val allowedPackages = setOf(
+    "com.google.android.apps.walletnfcrel", // Google Wallet
+    "com.android.shell"                     // adb-driven test notifications
+    // add your bank app package, e.g. "com.bmo.mobile.banking"
+)
 ```
 
-Configure it as:
+To find an app's exact package name, run `adb shell pm list packages` (or use an
+app-info viewer). Notifications from any package not in this set are ignored. The
+listener also skips any notification whose text does not contain `$` (except
+`com.android.shell`, kept for testing).
 
-```text
-Method: POST
-Content-Type: application/json
+### 3. Configure The Endpoint And Token
+
+`BASE_URL` and `API_TOKEN` are compiled into the app as `BuildConfig` fields.
+The build reads them from environment variables **or** Gradle properties, so put
+them where they stay out of version control — the simplest is your user-level
+Gradle properties file at `~/.gradle/gradle.properties`:
+
+```properties
+BASE_URL=https://your-vercel-domain.vercel.app
+API_TOKEN=YOUR_INBOUND_SECRET_TOKEN
 ```
 
-Use one of these URLs:
+Notes:
 
-```text
-https://your-vercel-domain.vercel.app/api/v1/ingest
+- `API_TOKEN` must exactly match `INBOUND_SECRET_TOKEN` from the backend `.env`.
+- `BASE_URL` must **not** end with a slash; the client appends `/api/v1/ingest`.
+- For same-Wi-Fi local testing, use your computer's LAN IP, e.g.
+  `http://192.168.1.25:8000` (see the local-testing note below about cleartext).
+
+### 4. Build And Install
+
+Open the `AndroidClient` folder in Android Studio and click **Run**, or build
+from the command line (Android Studio's bundled JDK works well):
+
+```powershell
+cd AndroidClient
+.\gradlew.bat :app:installDebug
 ```
 
-or, for same-Wi-Fi local testing:
+If Gradle reports it cannot find Java, point `JAVA_HOME` at the Android Studio
+JDK first, for example:
 
-```text
-http://YOUR_COMPUTER_IPV4:8000/api/v1/ingest
+```powershell
+$env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
 ```
 
-Add this header:
+### 5. Grant Notification Access
 
-```http
-Authorization: Bearer YOUR_INBOUND_SECRET_TOKEN
-```
+Launch the app once. It is headless: it opens the system **Notification access**
+screen and then closes. Toggle access **on** for this app. Android needs this
+special grant before the listener receives any notifications.
 
-Set the request body to JSON:
-
-```json
-{
-  "notification_title": "[not_title]",
-  "notification_text": "[not_text]",
-  "timestamp": "[not_timestamp]"
-}
-```
-
-Use MacroDroid's **Magic Text** picker to replace `[not_title]` with the actual
-notification title variable for your version of MacroDroid. The exact name may
-be shown as notification title, notification app title, notification subject, or
-similar.
-
-Use MacroDroid's **Magic Text** picker to replace `[not_text]` with the actual
-notification body variable for your version of MacroDroid. The exact name may be
-shown as notification text, notification body, notification content, or similar.
-
-Use MacroDroid's **Magic Text** picker to replace `[not_timestamp]` with the
-notification timestamp value. MacroDroid may emit this as Unix milliseconds:
-
-```text
-1782057637417
-```
-
-or Unix seconds:
-
-```text
-1782057883
-```
-
-The backend accepts both formats and normalizes them into a UTC datetime. As a
-rule of thumb, 13 digits means milliseconds and 10 digits means seconds.
-
-The backend also accepts ISO 8601 timezone-aware timestamps, such as
-`2026-06-17T20:55:00Z`. A value like `2026-06-17T20:55:00` will still be
-rejected because it has no timezone.
-
-### 5. Debug MacroDroid Before Using Real Purchases
-
-Add a temporary MacroDroid action before the HTTP request:
-
-```text
-Actions -> Device Actions -> Display Notification
-```
-
-Set the debug notification body to the same notification magic text values you
-plan to send:
-
-```text
-Captured title: [not_title]
-Captured body: [not_text]
-```
-
-Trigger the macro and confirm the displayed title contains the establishment and
-the displayed body contains the transaction amount.
+To verify it later: **Settings -> Notification access** should show this app
+enabled.
 
 ### 6. Confirm The End-To-End Result
 
-When MacroDroid sends a valid request, the API should respond with HTTP
-`202 Accepted` for a newly stored transaction, or `200 OK` for a duplicate retry:
+Trigger a matching transaction notification. On success the backend responds
+`202 Accepted` (new) or `200 OK` (duplicate retry), and a row appears in Supabase
+**Table Editor -> expenses**.
 
-```json
-{
-  "status": "accepted",
-  "timestamp": "2026-06-21T16:00:37.417000Z",
-  "transaction": {
-    "merchant_name": "Tim Hortons",
-    "amount": 14.5,
-    "category": "Food"
-  }
-}
-```
+To verify the offline fallback:
 
-If it fails:
+1. Put the phone in airplane mode.
+2. Trigger a matching notification. The POST fails and the request is stored in
+   the `failed_notifications` table.
+3. Turn connectivity back on. `NotificationSyncWorker` runs and drains the cache;
+   the row disappears and the transaction lands in Supabase.
 
-- HTTP `401` means the bearer token is missing or wrong.
-- HTTP `422` means the JSON body does not match the required schema.
-- HTTP `500` usually means Groq or Supabase configuration is missing or invalid.
-- A connection error usually means the phone cannot reach the server URL.
+You can inspect the local SQLite table live with Android Studio's
+**App Inspection -> Database Inspector** while the app is running.
 
-For local testing, make sure:
+### Troubleshooting
 
-- The phone and computer are on the same Wi-Fi network.
-- Uvicorn is running with `--host 0.0.0.0`.
-- Windows Firewall allows the Python/Uvicorn process.
-- MacroDroid is using the computer's LAN IP, not `localhost`.
-- `.env` contains valid `GROQ_API_KEY`, `SUPABASE_URL`, and
-  `SUPABASE_SERVICE_ROLE_KEY` values.
+- **Nothing is captured:** notification access is not granted, or the source
+  app's package is not in `allowedPackages`.
+- **HTTP `401`:** `API_TOKEN` does not match the backend `INBOUND_SECRET_TOKEN`.
+- **HTTP `422`:** the payload shape is wrong (should not happen with the stock
+  client).
+- **Offline items never send / the cache never fills:** confirm the Room KSP
+  wiring is intact — `app/build.gradle.kts` must apply the `kotlin.android` and
+  `ksp` plugins and use `ksp(libs.room.compiler)` (not `annotationProcessor`),
+  otherwise the database classes are not generated and the offline insert fails.
+- **Local (`http://`) testing does nothing:** Android blocks cleartext HTTP by
+  default. Production Vercel uses HTTPS and works as-is. For LAN `http://`
+  testing only, temporarily add `android:usesCleartextTraffic="true"` to the
+  `<application>` tag in
+  [`AndroidClient/app/src/main/AndroidManifest.xml`](AndroidClient/app/src/main/AndroidManifest.xml),
+  and make sure the phone and computer share a Wi-Fi network, Uvicorn runs with
+  `--host 0.0.0.0`, and Windows Firewall allows the Python process.

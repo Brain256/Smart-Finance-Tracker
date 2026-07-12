@@ -50,6 +50,21 @@ type CalendarCell = {
   total: number;
 };
 
+type IntensityLevel = {
+  className: string;
+  label: string;
+};
+
+// Index 0 = zero spend, 1..4 = increasing spend. Teal palette, monotonic.
+// Single source of truth for both cell rendering and the legend.
+const INTENSITY_LEVELS: IntensityLevel[] = [
+  { className: "bg-white text-slate-500", label: "No spending" },
+  { className: "bg-teal-50 text-teal-950", label: "Low" },
+  { className: "bg-teal-200 text-teal-950", label: "Moderate" },
+  { className: "bg-teal-500 text-white", label: "High" },
+  { className: "bg-teal-700 text-white", label: "Highest" }
+];
+
 const chartColors = [
   "#0f766e",
   "#2563eb",
@@ -170,22 +185,38 @@ function buildCalendarCells(expenses: ExpenseRecord[], monthAnchor: Date): Calen
   });
 }
 
-function getCalendarIntensity(total: number, maxTotal: number): string {
+function getIntensityLevel(total: number, maxTotal: number): number {
   if (total <= 0 || maxTotal <= 0) {
-    return "bg-white";
+    return 0; // zero-spend level
   }
 
-  const ratio = total / maxTotal;
+  const ratio = total / maxTotal; // Relative_Spend in (0, 1]
 
-  if (ratio > 0.75) {
-    return "bg-teal-700 text-white";
+  // Four non-zero bands. The max-spend day (ratio === 1) lands in the top band.
+  if (ratio > 0.75) return 4;
+  if (ratio > 0.5) return 3;
+  if (ratio > 0.25) return 2;
+  return 1;
+}
+
+const cellDateFormatter = new Intl.DateTimeFormat("en-CA", {
+  month: "short",
+  day: "numeric",
+  year: "numeric"
+});
+
+function formatCellDate(date: Date): string {
+  return cellDateFormatter.format(date);
+}
+
+function getCellDetailText(cell: CalendarCell): string {
+  const dateLabel = formatCellDate(cell.date);
+
+  if (cell.total > 0) {
+    return `${dateLabel}: ${formatCurrency(cell.total)} spent`;
   }
 
-  if (ratio > 0.45) {
-    return "bg-teal-200 text-teal-950";
-  }
-
-  return "bg-teal-50 text-teal-950";
+  return `${dateLabel}: no spending`;
 }
 
 function sortExpenses(expenses: ExpenseRecord[], sortState: SortState): ExpenseRecord[] {
@@ -353,9 +384,30 @@ function SpendingPieChart({
   );
 }
 
+function CalendarLegend() {
+  return (
+    <div className="mt-4 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-xs text-[var(--muted)] sm:justify-end">
+      <span className="font-medium">Less</span>
+      <ul className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        {INTENSITY_LEVELS.map((level) => (
+          <li className="flex items-center gap-1.5" key={level.label}>
+            <span
+              aria-hidden="true"
+              className={`h-3.5 w-3.5 shrink-0 rounded-sm border border-slate-200 ${level.className}`}
+            />
+            <span className="whitespace-nowrap">{level.label}</span>
+          </li>
+        ))}
+      </ul>
+      <span className="font-medium">More</span>
+    </div>
+  );
+}
+
 export function DashboardClient({ expenses }: DashboardClientProps) {
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
   const [monthAnchor, setMonthAnchor] = useState(() => new Date());
+  const [activeCellKey, setActiveCellKey] = useState<string | null>(null);
   const [sortState, setSortState] = useState<SortState>({
     key: "timestamp",
     direction: "desc"
@@ -496,14 +548,29 @@ export function DashboardClient({ expenses }: DashboardClientProps) {
           </div>
 
           <div className="mt-1 grid grid-cols-7 gap-1 sm:gap-2">
-            {calendarCells.map((cell) => (
-              <div
-                className={`min-h-16 rounded-md border p-1.5 sm:min-h-24 sm:p-2 ${
+            {calendarCells.map((cell) => {
+              const level = getIntensityLevel(cell.total, maxDailySpend);
+              const detailText = getCellDetailText(cell);
+              const isActive = activeCellKey === cell.key;
+
+              return (
+              <button
+                aria-label={detailText}
+                className={`focus-ring relative block w-full min-h-16 rounded-md border p-1.5 text-left sm:min-h-24 sm:p-2 ${INTENSITY_LEVELS[level].className} ${
                   cell.isCurrentMonth
                     ? "border-[var(--border)]"
                     : "border-slate-100 opacity-45"
-                } ${getCalendarIntensity(cell.total, maxDailySpend)}`}
+                }`}
                 key={cell.key}
+                onBlur={() => setActiveCellKey((current) => (current === cell.key ? null : current))}
+                onClick={() =>
+                  setActiveCellKey((current) => (current === cell.key ? null : cell.key))
+                }
+                onFocus={() => setActiveCellKey(cell.key)}
+                onMouseEnter={() => setActiveCellKey(cell.key)}
+                onMouseLeave={() => setActiveCellKey((current) => (current === cell.key ? null : current))}
+                title={detailText}
+                type="button"
               >
                 <div className="flex h-full min-h-12 flex-col justify-between gap-1 sm:min-h-20">
                   <span className="text-left text-xs font-semibold sm:text-sm">
@@ -513,9 +580,25 @@ export function DashboardClient({ expenses }: DashboardClientProps) {
                     {cell.total > 0 ? formatCompactCurrency(cell.total) : "$0"}
                   </span>
                 </div>
-              </div>
-            ))}
+                {isActive ? (
+                  <div
+                    className="absolute bottom-full left-1/2 z-20 mb-1 w-max max-w-[12rem] -translate-x-1/2 rounded-md border border-slate-200 bg-white px-2 py-1 text-left text-xs font-medium text-slate-900 shadow-lg"
+                    role="status"
+                  >
+                    <span className="block whitespace-nowrap">
+                      {formatCellDate(cell.date)}
+                    </span>
+                    <span className="block whitespace-nowrap text-slate-600">
+                      {cell.total > 0 ? formatCurrency(cell.total) : "No spending"}
+                    </span>
+                  </div>
+                ) : null}
+              </button>
+              );
+            })}
           </div>
+
+          <CalendarLegend />
         </section>
       ) : null}
 

@@ -1,0 +1,7 @@
+# Project-wide Gradle settings.
+org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+kotlin.code.style=official
+
+# API Secrets (Add these to your local gradle.properties)
+# BASE_URL="https://your-vercel-domain.vercel.app"
+# API_TOKEN="your_secret_token_here"

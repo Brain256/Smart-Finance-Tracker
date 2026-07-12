@@ -1,4 +1,5 @@
 .env
+.kiro/
 .venv/
 __pycache__/
 *.py[cod]
