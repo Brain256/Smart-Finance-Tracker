@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -12,6 +12,7 @@ import {
   MapPin,
   PieChart as PieChartIcon,
   ReceiptText,
+  Trash2,
   Wallet
 } from "lucide-react";
 import {
@@ -22,6 +23,7 @@ import {
   Tooltip
 } from "recharts";
 
+import { deleteExpense } from "@/app/dashboard/actions";
 import {
   formatCompactCurrency,
   formatCurrency,
@@ -38,6 +40,7 @@ import type {
 } from "@/lib/types";
 
 type DashboardClientProps = {
+  canDelete: boolean;
   expenses: ExpenseRecord[];
 };
 
@@ -404,14 +407,41 @@ function CalendarLegend() {
   );
 }
 
-export function DashboardClient({ expenses }: DashboardClientProps) {
+export function DashboardClient({ canDelete, expenses }: DashboardClientProps) {
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
   const [monthAnchor, setMonthAnchor] = useState(() => new Date());
   const [activeCellKey, setActiveCellKey] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deletingExpenseId, setDeletingExpenseId] = useState<number | null>(null);
+  const [isDeletePending, startDeleteTransition] = useTransition();
   const [sortState, setSortState] = useState<SortState>({
     key: "timestamp",
     direction: "desc"
   });
+
+  function handleDelete(expense: ExpenseRecord): void {
+    const confirmed = window.confirm(
+      `Delete the ${formatCurrency(expense.amount)} transaction from ${expense.merchantName}?`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setDeleteError(null);
+    setDeletingExpenseId(expense.id);
+    startDeleteTransition(async () => {
+      try {
+        await deleteExpense(expense.id);
+      } catch (error) {
+        setDeleteError(
+          error instanceof Error ? error.message : "Unable to delete the expense."
+        );
+      } finally {
+        setDeletingExpenseId(null);
+      }
+    });
+  }
 
   const spendingExpenses = useMemo(
     () => expenses.filter(isSpendingExpense),
@@ -618,6 +648,15 @@ export function DashboardClient({ expenses }: DashboardClientProps) {
             </div>
           </div>
 
+          {deleteError ? (
+            <div
+              className="border-b border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+              role="alert"
+            >
+              {deleteError}
+            </div>
+          ) : null}
+
           <div className="overflow-x-auto">
             <table className="min-w-[680px] table-fixed text-left text-sm">
               <thead className="bg-slate-50 text-xs uppercase text-slate-500">
@@ -643,6 +682,11 @@ export function DashboardClient({ expenses }: DashboardClientProps) {
                       </button>
                     </th>
                   ))}
+                  {canDelete ? (
+                    <th className="w-32 px-4 py-3 text-right font-semibold">
+                      Actions
+                    </th>
+                  ) : null}
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--border)]">
@@ -658,6 +702,22 @@ export function DashboardClient({ expenses }: DashboardClientProps) {
                     <td className="px-4 py-3 font-semibold text-slate-950">
                       {formatCurrency(expense.amount)}
                     </td>
+                    {canDelete ? (
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          aria-label={`Delete transaction from ${expense.merchantName}`}
+                          className="focus-ring inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          disabled={isDeletePending}
+                          onClick={() => handleDelete(expense)}
+                          type="button"
+                        >
+                          <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
+                          {isDeletePending && deletingExpenseId === expense.id
+                            ? "Deleting..."
+                            : "Delete"}
+                        </button>
+                      </td>
+                    ) : null}
                   </tr>
                 ))}
               </tbody>

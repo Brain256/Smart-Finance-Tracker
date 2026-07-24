@@ -43,7 +43,10 @@ export default async function DashboardPage() {
           </div>
         ) : null}
 
-        <DashboardClient expenses={dashboardData.expenses} />
+        <DashboardClient
+          canDelete={!dashboardData.isDemoData}
+          expenses={dashboardData.expenses}
+        />
       </div>
     </main>
   );
