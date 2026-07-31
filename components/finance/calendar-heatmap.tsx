@@ -3,7 +3,8 @@
 import { useEffect, useRef } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
-import { buildHeatmapDays, NON_ZERO_INTENSITY_LEVEL_COUNT } from "@/lib/finance-analytics";
+import { DaySummaryPanel } from "@/components/finance/day-summary";
+import { buildDaySummary, buildHeatmapDays, NON_ZERO_INTENSITY_LEVEL_COUNT } from "@/lib/finance-analytics";
 import { formatCurrency } from "@/lib/format";
 import type { ExpenseRecord } from "@/lib/types";
 
@@ -11,10 +12,14 @@ type CalendarHeatmapProps = {
   expenses: ExpenseRecord[];
   monthKey: string;
   activeCellKey: string | null;
+  selectedDateKey: string | null;
   onChangeMonth: (offset: number) => void;
   onActiveCellKeyChange: (key: string | null | ((current: string | null) => string | null)) => void;
+  onSelectDate: (key: string | null) => void;
   financeTimezone: string;
 };
+
+const DAY_SUMMARY_PANEL_ID = "calendar-day-summary";
 
 export type IntensityLevel = { className: string; descriptor: string };
 
@@ -52,9 +57,10 @@ function CalendarLegend() {
   return <div className="mt-4 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-xs text-[var(--muted)] sm:justify-end"><span className="font-medium">Less</span><ul className="flex flex-wrap items-center gap-x-3 gap-y-2">{INTENSITY_LEVELS.map((level) => <li className="flex items-center gap-1.5" key={level.descriptor}><span aria-hidden="true" className={`h-3.5 w-3.5 shrink-0 rounded-sm border border-slate-200 ${level.className}`} /><span className="whitespace-nowrap">{level.descriptor}</span></li>)}</ul><span className="font-medium">More</span></div>;
 }
 
-export function CalendarHeatmap({ expenses, monthKey, activeCellKey, onChangeMonth, onActiveCellKeyChange, financeTimezone }: CalendarHeatmapProps) {
+export function CalendarHeatmap({ expenses, monthKey, activeCellKey, selectedDateKey, onChangeMonth, onActiveCellKeyChange, onSelectDate, financeTimezone }: CalendarHeatmapProps) {
   const grid = buildHeatmapDays(expenses, monthKey, financeTimezone);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const daySummary = selectedDateKey === null ? null : buildDaySummary(expenses, selectedDateKey, financeTimezone);
 
   // Requirement 13.13: a tap outside the open cell closes its detail.
   useEffect(() => {
@@ -74,6 +80,8 @@ export function CalendarHeatmap({ expenses, monthKey, activeCellKey, onChangeMon
     const label = getCellLabel(day.dateKey, day.total, day.level);
     const isActive = activeCellKey === day.dateKey;
 
-    return <div className="relative" key={day.dateKey}><button aria-label={label} className={`focus-ring block aspect-square w-full rounded-sm border border-slate-200 ${INTENSITY_LEVELS[day.level].className}`} data-date={day.dateKey} data-level={day.level} onBlur={() => onActiveCellKeyChange((current: string | null) => current === day.dateKey ? null : current)} onClick={() => onActiveCellKeyChange(day.dateKey)} onFocus={() => onActiveCellKeyChange(day.dateKey)} onMouseEnter={() => onActiveCellKeyChange(day.dateKey)} onMouseLeave={() => onActiveCellKeyChange((current: string | null) => current === day.dateKey ? null : current)} type="button" />{isActive ? <div className="absolute bottom-full left-1/2 z-20 mb-1 w-max max-w-[12rem] -translate-x-1/2 rounded-md border border-slate-200 bg-white px-2 py-1 text-left text-xs font-medium text-slate-900 shadow-lg" role="status"><span className="block whitespace-nowrap">{formatCellDate(day.dateKey)}</span><span className="block whitespace-nowrap text-slate-600">{day.total > 0 ? formatCurrency(day.total) : "No spending"}</span></div> : null}</div>;
-  })}{Array.from({ length: grid.trailingPadding }, (_, index) => <div aria-hidden="true" className="aspect-square rounded-sm" key={`trailing-${index}`} />)}</div><CalendarLegend /></section>;
+    const isSelected = selectedDateKey === day.dateKey;
+
+    return <div className="relative" key={day.dateKey}><button aria-controls={isSelected ? DAY_SUMMARY_PANEL_ID : undefined} aria-expanded={isSelected} aria-label={label} className={`focus-ring block aspect-square w-full rounded-sm border ${isSelected ? "border-slate-900 ring-1 ring-slate-900" : "border-slate-200"} ${INTENSITY_LEVELS[day.level].className}`} data-date={day.dateKey} data-level={day.level} onBlur={() => onActiveCellKeyChange((current: string | null) => current === day.dateKey ? null : current)} onClick={() => { onActiveCellKeyChange(day.dateKey); onSelectDate(isSelected ? null : day.dateKey); }} onFocus={() => onActiveCellKeyChange(day.dateKey)} onMouseEnter={() => onActiveCellKeyChange(day.dateKey)} onMouseLeave={() => onActiveCellKeyChange((current: string | null) => current === day.dateKey ? null : current)} type="button" />{isActive ? <div className="absolute bottom-full left-1/2 z-20 mb-1 w-max max-w-[12rem] -translate-x-1/2 rounded-md border border-slate-200 bg-white px-2 py-1 text-left text-xs font-medium text-slate-900 shadow-lg" role="status"><span className="block whitespace-nowrap">{formatCellDate(day.dateKey)}</span><span className="block whitespace-nowrap text-slate-600">{day.total > 0 ? formatCurrency(day.total) : "No spending"}</span></div> : null}</div>;
+  })}{Array.from({ length: grid.trailingPadding }, (_, index) => <div aria-hidden="true" className="aspect-square rounded-sm" key={`trailing-${index}`} />)}</div><CalendarLegend />{daySummary === null ? null : <DaySummaryPanel financeTimezone={financeTimezone} onClose={() => onSelectDate(null)} panelId={DAY_SUMMARY_PANEL_ID} summary={daySummary} />}</section>;
 }

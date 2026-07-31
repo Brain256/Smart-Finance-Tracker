@@ -45,6 +45,16 @@ export type FilterDateRange =
   | { status: "applied"; startDate: string; endDate: string }
   | { status: "invalid"; message: string };
 
+export type DayCategoryTotal = { category: ExpenseCategory; total: number };
+export type DaySummary = {
+  dateKey: string;
+  spendingTotal: number;
+  spendingCount: number;
+  transactions: ExpenseRecord[];
+  incomeTransactions: ExpenseRecord[];
+  categoryTotals: DayCategoryTotal[];
+};
+
 export type HeatmapDay = { dateKey: string; day: number; total: number; level: number };
 export type HeatmapGrid = {
   monthKey: string;
@@ -508,6 +518,54 @@ export function buildHeatmapDays(
     leadingPadding,
     trailingPadding,
     maxTotal: centsToAmount(maxCents)
+  };
+}
+
+/**
+ * Summarizes one finance-local day for the calendar detail panel. Selection uses the
+ * same date key the heatmap buckets on, so a panel can never disagree with the cell
+ * that opened it. Income is returned separately and never enters the spending total.
+ */
+export function buildDaySummary(
+  expenses: readonly ExpenseRecord[],
+  dateKey: string,
+  timeZone: string
+): DaySummary {
+  const transactions: ExpenseRecord[] = [];
+  const incomeTransactions: ExpenseRecord[] = [];
+  const centsByCategory = new Map<ExpenseCategory, number>();
+  let spendingCents = 0;
+
+  for (const expense of expenses) {
+    if (getExpenseDateKey(expense, timeZone) !== dateKey) continue;
+
+    if (!isSpendingExpense(expense)) {
+      incomeTransactions.push(expense);
+      continue;
+    }
+
+    const cents = amountToCents(expense.amount);
+    spendingCents += cents;
+    centsByCategory.set(expense.category, (centsByCategory.get(expense.category) ?? 0) + cents);
+    transactions.push(expense);
+  }
+
+  const byTimestampAscending = (first: ExpenseRecord, second: ExpenseRecord): number =>
+    new Date(first.timestamp).getTime() - new Date(second.timestamp).getTime();
+
+  return {
+    dateKey,
+    spendingTotal: centsToAmount(spendingCents),
+    spendingCount: transactions.length,
+    transactions: transactions.sort(byTimestampAscending),
+    incomeTransactions: incomeTransactions.sort(byTimestampAscending),
+    // Largest category first; the name breaks ties so equal totals stay deterministic.
+    categoryTotals: Array.from(centsByCategory, ([category, cents]) => ({
+      category,
+      total: centsToAmount(cents)
+    })).sort((first, second) =>
+      second.total - first.total || first.category.localeCompare(second.category)
+    )
   };
 }
 

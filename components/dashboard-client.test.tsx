@@ -487,6 +487,121 @@ describe("Calendar heatmap", () => {
   });
 });
 
+describe("Calendar day summary", () => {
+  function cells(): HTMLElement[] {
+    return screen.getAllByRole("button").filter((button) => button.hasAttribute("data-date"));
+  }
+
+  async function openCalendar(expenses: ExpenseRecord[]) {
+    renderDashboard(expenses);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("tab", { name: "Calendar" }));
+    const byDate = new Map(cells().map((cell) => [cell.getAttribute("data-date"), cell]));
+
+    return { user, byDate };
+  }
+
+  function panel(): HTMLElement {
+    return screen.getByRole("region", { name: /Transactions for/ });
+  }
+
+  const dayExpenses: ExpenseRecord[] = [
+    expense({ id: 1, merchantName: "Tim Hortons", amount: 14.5, category: "Food", timestamp: "2025-01-08T19:15:00.000Z" }),
+    expense({ id: 2, merchantName: "T&T Supermarket", amount: 25.5, category: "Shopping", timestamp: "2025-01-08T23:40:00.000Z" }),
+    expense({ id: 3, merchantName: "Other Day Cafe", amount: 99, category: "Food", timestamp: "2025-01-09T17:00:00.000Z" })
+  ];
+
+  it("lists only the clicked day's transactions with merchant, category, and amount", async () => {
+    const { user, byDate } = await openCalendar(dayExpenses);
+
+    await user.click(byDate.get("2025-01-08")!);
+
+    const detail = panel();
+    const rows = within(detail).getByRole("list", { name: "Spending transactions" });
+    expect(within(rows).getByText("Tim Hortons")).toBeInTheDocument();
+    expect(within(rows).getByText("$14.50")).toBeInTheDocument();
+    expect(within(rows).getByText("T&T Supermarket")).toBeInTheDocument();
+    expect(within(rows).getByText("$25.50")).toBeInTheDocument();
+    expect(within(detail).queryByText("Other Day Cafe")).not.toBeInTheDocument();
+    expect(detail).toHaveTextContent("$40.00");
+    expect(detail).toHaveTextContent("2 transactions");
+  });
+
+  it("shows a per-category breakdown for the day", async () => {
+    const { user, byDate } = await openCalendar([
+      ...dayExpenses,
+      expense({ id: 4, merchantName: "Second Cafe", amount: 10, category: "Food", timestamp: "2025-01-08T20:00:00.000Z" })
+    ]);
+
+    await user.click(byDate.get("2025-01-08")!);
+
+    // Food sums two rows to 24.50, which still ranks below the single 25.50 Shopping entry.
+    const breakdown = within(panel()).getByRole("list", { name: "Category breakdown" });
+    expect(within(breakdown).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+      "Shopping$25.50",
+      "Food$24.50"
+    ]);
+  });
+
+  it("lists income separately and keeps it out of the day total", async () => {
+    const { user, byDate } = await openCalendar([
+      expense({ id: 1, merchantName: "Tim Hortons", amount: 14.5, category: "Food", timestamp: "2025-01-08T19:15:00.000Z" }),
+      expense({ id: 2, merchantName: "Payroll", amount: 2000, category: "Income", timestamp: "2025-01-08T14:00:00.000Z" })
+    ]);
+
+    await user.click(byDate.get("2025-01-08")!);
+
+    const detail = panel();
+    expect(detail).toHaveTextContent("$14.50 · 1 transaction");
+    expect(within(detail).getByText(/Income \(not counted in the total\)/)).toBeInTheDocument();
+    expect(within(detail).getByText("Payroll")).toBeInTheDocument();
+    expect(detail).not.toHaveTextContent("$2,014.50");
+  });
+
+  it("opens an empty-state message for a day with no transactions", async () => {
+    const { user, byDate } = await openCalendar(dayExpenses);
+
+    await user.click(byDate.get("2025-01-20")!);
+
+    expect(within(panel()).getByText("No transactions on this day.")).toBeInTheDocument();
+  });
+
+  it("dismisses on a second click of the same day and via the close button", async () => {
+    const { user, byDate } = await openCalendar(dayExpenses);
+
+    await user.click(byDate.get("2025-01-08")!);
+    expect(screen.queryByRole("region", { name: /Transactions for/ })).toBeInTheDocument();
+
+    await user.click(byDate.get("2025-01-08")!);
+    expect(screen.queryByRole("region", { name: /Transactions for/ })).not.toBeInTheDocument();
+
+    await user.click(byDate.get("2025-01-08")!);
+    await user.click(screen.getByRole("button", { name: "Close day details" }));
+    expect(screen.queryByRole("region", { name: /Transactions for/ })).not.toBeInTheDocument();
+  });
+
+  it("clears the panel when the month changes", async () => {
+    const { user, byDate } = await openCalendar(dayExpenses);
+
+    await user.click(byDate.get("2025-01-08")!);
+    expect(screen.queryByRole("region", { name: /Transactions for/ })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Previous month" }));
+    expect(screen.queryByRole("region", { name: /Transactions for/ })).not.toBeInTheDocument();
+  });
+
+  it("marks the selected cell as expanded and leaves the hover tooltip alone", async () => {
+    const { user, byDate } = await openCalendar(dayExpenses);
+
+    await user.click(byDate.get("2025-01-08")!);
+
+    expect(byDate.get("2025-01-08")).toHaveAttribute("aria-expanded", "true");
+    expect(byDate.get("2025-01-09")).toHaveAttribute("aria-expanded", "false");
+    // The tooltip keeps sole ownership of role="status"; the panel must not add one.
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+  });
+});
+
 describe("Settings planning editors", () => {
   async function openSettings(snapshot: Partial<SnapshotProps> = {}) {
     const user = userEvent.setup();

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   amountToCents,
+  buildDaySummary,
   centsToAmount,
   getBudgetProgress,
   getFinanceDateKey,
@@ -195,6 +196,104 @@ describe("finance analytics", () => {
     expect(getProjection(expenses, null, null, null, "2026-06-15", TIME_ZONE)).toEqual({
       status: "incomplete",
       missing: ["budgets", "active-income", "savings-target"]
+    });
+  });
+});
+
+describe("buildDaySummary", () => {
+  it("buckets by the finance-local day, not the UTC day", () => {
+    // 03:30 UTC on Jan 9 is 22:30 on Jan 8 in Toronto, so it belongs to the 8th.
+    const lateEvening = expense(1, 20, "Food", "2026-01-09T03:30:00.000Z");
+    const nextMorning = expense(2, 30, "Food", "2026-01-09T14:00:00.000Z");
+    const expenses = [lateEvening, nextMorning];
+
+    expect(buildDaySummary(expenses, "2026-01-08", TIME_ZONE)).toMatchObject({
+      spendingTotal: 20,
+      spendingCount: 1
+    });
+    expect(buildDaySummary(expenses, "2026-01-09", TIME_ZONE)).toMatchObject({
+      spendingTotal: 30,
+      spendingCount: 1
+    });
+  });
+
+  it("keeps income out of the spending total and returns it separately", () => {
+    const summary = buildDaySummary(
+      [
+        expense(1, 40, "Food", "2026-01-08T17:00:00.000Z"),
+        expense(2, 9999, "Income", "2026-01-08T18:00:00.000Z")
+      ],
+      "2026-01-08",
+      TIME_ZONE
+    );
+
+    expect(summary.spendingTotal).toBe(40);
+    expect(summary.spendingCount).toBe(1);
+    expect(summary.transactions.map((entry) => entry.id)).toEqual([1]);
+    expect(summary.incomeTransactions.map((entry) => entry.id)).toEqual([2]);
+    expect(summary.categoryTotals).toEqual([{ category: "Food", total: 40 }]);
+  });
+
+  it("orders transactions chronologically and categories by descending total", () => {
+    const summary = buildDaySummary(
+      [
+        expense(1, 5, "Transport", "2026-01-08T20:00:00.000Z"),
+        expense(2, 30, "Food", "2026-01-08T13:00:00.000Z"),
+        expense(3, 12, "Food", "2026-01-08T16:00:00.000Z")
+      ],
+      "2026-01-08",
+      TIME_ZONE
+    );
+
+    expect(summary.transactions.map((entry) => entry.id)).toEqual([2, 3, 1]);
+    expect(summary.categoryTotals).toEqual([
+      { category: "Food", total: 42 },
+      { category: "Transport", total: 5 }
+    ]);
+  });
+
+  it("breaks category ties by name so the order is deterministic", () => {
+    const summary = buildDaySummary(
+      [
+        expense(1, 10, "Transport", "2026-01-08T13:00:00.000Z"),
+        expense(2, 10, "Bills", "2026-01-08T14:00:00.000Z"),
+        expense(3, 10, "Food", "2026-01-08T15:00:00.000Z")
+      ],
+      "2026-01-08",
+      TIME_ZONE
+    );
+
+    expect(summary.categoryTotals.map((entry) => entry.category)).toEqual([
+      "Bills",
+      "Food",
+      "Transport"
+    ]);
+  });
+
+  it("sums in cents so repeating decimals do not drift", () => {
+    const summary = buildDaySummary(
+      [
+        expense(1, 0.1, "Food", "2026-01-08T13:00:00.000Z"),
+        expense(2, 0.2, "Food", "2026-01-08T14:00:00.000Z")
+      ],
+      "2026-01-08",
+      TIME_ZONE
+    );
+
+    expect(summary.spendingTotal).toBe(0.3);
+    expect(summary.categoryTotals).toEqual([{ category: "Food", total: 0.3 }]);
+  });
+
+  it("returns an empty summary for a day with no transactions", () => {
+    expect(
+      buildDaySummary([expense(1, 40, "Food", "2026-01-08T17:00:00.000Z")], "2026-01-09", TIME_ZONE)
+    ).toEqual({
+      dateKey: "2026-01-09",
+      spendingTotal: 0,
+      spendingCount: 0,
+      transactions: [],
+      incomeTransactions: [],
+      categoryTotals: []
     });
   });
 });
