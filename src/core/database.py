@@ -1,6 +1,7 @@
 """Async Supabase persistence helpers for transaction storage."""
 
 import os
+from collections.abc import Mapping
 from datetime import datetime
 from enum import Enum
 from typing import TypedDict
@@ -9,27 +10,25 @@ from dotenv import load_dotenv
 from postgrest.exceptions import APIError
 from supabase import AsyncClient, create_async_client
 
-from src.schemas.transaction import CleanTransaction
+from src.schemas.transaction import CategoryEnum, ResolvedTransaction
 
 EXPENSES_TABLE = "expenses"
+RESOLVE_LATEST_CORRECTION_RPC = "resolve_latest_correction"
 TRANSACTION_CONFLICT_TARGET = "merchant_name,amount,timestamp"
 POSTGRES_UNIQUE_VIOLATION_CODE = "23505"
 
 
 class ExpenseUpsertPayload(TypedDict):
-    """Represents the row payload sent to the Supabase expenses table.
-
-    Attributes:
-        merchant_name: Normalized merchant or payer name.
-        amount: Positive transaction amount in dollar units.
-        category: Strict transaction category string.
-        timestamp: Timezone-aware transaction timestamp serialized for Postgres.
-    """
+    """Represents the complete notification-derived expenses row payload."""
 
     merchant_name: str
     amount: float
     category: str
     timestamp: str
+    confidence: float
+    reviewed: bool
+    classified_at: str
+    classification_origin: str
 
 
 class TransactionPersistenceStatus(str, Enum):
@@ -67,24 +66,76 @@ async def get_supabase_client() -> AsyncClient:
 
 
 def build_expense_upsert_payload(
-    transaction: CleanTransaction,
+    transaction: ResolvedTransaction,
     timestamp: datetime,
+    classified_at: datetime,
 ) -> ExpenseUpsertPayload:
-    """Builds the exact expenses row payload for Supabase upsert operations.
+    """Builds the complete metadata-bearing payload for a resolved expense.
 
     Args:
-        transaction: Clean transaction entities extracted from notification text.
+        transaction: LLM classification after correction lookup resolution.
         timestamp: Timezone-aware notification timestamp to persist.
+        classified_at: Time at which the accepted LLM classification was stored.
 
     Returns:
-        An ExpenseUpsertPayload matching the database table columns.
+        An ExpenseUpsertPayload matching all enabled ingestion columns.
     """
     return {
         "merchant_name": transaction.merchant_name,
         "amount": transaction.amount,
         "category": transaction.category.value,
         "timestamp": timestamp.isoformat(),
+        "confidence": transaction.confidence,
+        "reviewed": transaction.reviewed,
+        "classified_at": classified_at.isoformat(),
+        "classification_origin": transaction.classification_origin,
     }
+
+
+async def resolve_latest_correction(merchant_name: str) -> CategoryEnum | None:
+    """Looks up the newest corrected category for a canonical merchant.
+
+    The RPC is the sole category-reuse source. An unexpected RPC result is a
+    lookup failure, not a safe-to-ignore cache miss.
+
+    Args:
+        merchant_name: Display merchant name to normalize in the database RPC.
+
+    Returns:
+        The corrected category, or None when no correction matches.
+
+    Raises:
+        RuntimeError: If the RPC response does not represent zero or one valid row.
+        APIError: If Supabase cannot complete the RPC.
+    """
+    client = await get_supabase_client()
+    result = await client.rpc(
+        RESOLVE_LATEST_CORRECTION_RPC,
+        {"p_merchant_name": merchant_name},
+    ).execute()
+    rows = result.data
+
+    if rows is None:
+        return None
+
+    if not isinstance(rows, list) or len(rows) > 1:
+        raise RuntimeError("Correction lookup returned an invalid result.")
+
+    if not rows:
+        return None
+
+    row = rows[0]
+    if not isinstance(row, Mapping):
+        raise RuntimeError("Correction lookup returned an invalid result.")
+
+    corrected_category = row.get("corrected_category")
+    if not isinstance(corrected_category, str):
+        raise RuntimeError("Correction lookup returned an invalid result.")
+
+    try:
+        return CategoryEnum(corrected_category)
+    except ValueError as error:
+        raise RuntimeError("Correction lookup returned an invalid result.") from error
 
 
 def is_duplicate_transaction_error(error: APIError) -> bool:
@@ -100,14 +151,19 @@ def is_duplicate_transaction_error(error: APIError) -> bool:
 
 
 async def upsert_expense_transaction(
-    transaction: CleanTransaction,
+    transaction: ResolvedTransaction,
     timestamp: datetime,
+    classified_at: datetime,
 ) -> TransactionPersistenceStatus:
-    """Persists a clean transaction into Supabase with idempotency controls.
+    """Persists a resolved transaction with all ingestion metadata.
+
+    Existing composite-conflict behavior remains intentionally unchanged while
+    exactly-once retry guarantees remain deferred.
 
     Args:
-        transaction: Clean transaction entities extracted from notification text.
+        transaction: LLM classification after correction lookup resolution.
         timestamp: Timezone-aware notification timestamp to persist.
+        classified_at: Time at which the accepted LLM classification was stored.
 
     Returns:
         TransactionPersistenceStatus.STORED after a successful upsert, or
@@ -118,10 +174,10 @@ async def upsert_expense_transaction(
         APIError: If Supabase rejects the operation for a non-duplicate reason.
     """
     client = await get_supabase_client()
-    payload = build_expense_upsert_payload(transaction, timestamp)
+    payload = build_expense_upsert_payload(transaction, timestamp, classified_at)
 
     try:
-        # The composite conflict target makes cellular retry delivery idempotent.
+        # Preserve the existing deferred idempotency behavior and conflict target.
         await (
             client.table(EXPENSES_TABLE)
             .upsert(

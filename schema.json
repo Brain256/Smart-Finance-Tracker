@@ -16,6 +16,120 @@
       "title": "CategoryEnum",
       "type": "string"
     },
+    "LlmClassification": {
+      "$defs": {
+        "CategoryEnum": {
+          "description": "Defines the only supported transaction categories for storage.\n\nAttributes:\n    FOOD: Food purchases, cafes, groceries, and restaurants.\n    TRANSPORT: Transit, ride share, fuel, and parking charges.\n    ENTERTAINMENT: Media, events, subscriptions, and leisure purchases.\n    BILLS: Recurring utilities, phone, insurance, and fixed obligations.\n    SHOPPING: Retail, ecommerce, and discretionary goods purchases.\n    INCOME: Deposits, payroll, refunds, and other inbound money events.\n    MISCELLANEOUS: Transactions that do not confidently fit another bucket.",
+          "enum": [
+            "Food",
+            "Transport",
+            "Entertainment",
+            "Bills",
+            "Shopping",
+            "Income",
+            "Miscellaneous"
+          ],
+          "title": "CategoryEnum",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Represents the validated category proposal returned by the LLM.\n\nConfidence measures certainty that ``category`` is correct for the\nnormalized merchant and notification event. It does not measure confidence\nin amount parsing or overall response quality.",
+      "properties": {
+        "merchant_name": {
+          "minLength": 1,
+          "title": "Merchant Name",
+          "type": "string"
+        },
+        "amount": {
+          "exclusiveMinimum": 0,
+          "title": "Amount",
+          "type": "number"
+        },
+        "category": {
+          "$ref": "#/$defs/CategoryEnum"
+        },
+        "confidence": {
+          "description": "LLM certainty from 0 through 1 that the selected category is correct for this merchant and transaction event.",
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        }
+      },
+      "required": [
+        "merchant_name",
+        "amount",
+        "category",
+        "confidence"
+      ],
+      "title": "LlmClassification",
+      "type": "object"
+    },
+    "ResolvedTransaction": {
+      "$defs": {
+        "CategoryEnum": {
+          "description": "Defines the only supported transaction categories for storage.\n\nAttributes:\n    FOOD: Food purchases, cafes, groceries, and restaurants.\n    TRANSPORT: Transit, ride share, fuel, and parking charges.\n    ENTERTAINMENT: Media, events, subscriptions, and leisure purchases.\n    BILLS: Recurring utilities, phone, insurance, and fixed obligations.\n    SHOPPING: Retail, ecommerce, and discretionary goods purchases.\n    INCOME: Deposits, payroll, refunds, and other inbound money events.\n    MISCELLANEOUS: Transactions that do not confidently fit another bucket.",
+          "enum": [
+            "Food",
+            "Transport",
+            "Entertainment",
+            "Bills",
+            "Shopping",
+            "Income",
+            "Miscellaneous"
+          ],
+          "title": "CategoryEnum",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Represents an LLM classification after category-resolution metadata.\n\nA correction lookup may replace ``category`` while retaining the original\nLLM ``confidence``. The resolution process records both whether review is\ncomplete and which source supplied the stored category.",
+      "properties": {
+        "merchant_name": {
+          "minLength": 1,
+          "title": "Merchant Name",
+          "type": "string"
+        },
+        "amount": {
+          "exclusiveMinimum": 0,
+          "title": "Amount",
+          "type": "number"
+        },
+        "category": {
+          "$ref": "#/$defs/CategoryEnum"
+        },
+        "confidence": {
+          "description": "LLM certainty from 0 through 1 that the selected category is correct for this merchant and transaction event.",
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "reviewed": {
+          "title": "Reviewed",
+          "type": "boolean"
+        },
+        "classification_origin": {
+          "enum": [
+            "llm",
+            "correction_lookup"
+          ],
+          "title": "Classification Origin",
+          "type": "string"
+        }
+      },
+      "required": [
+        "merchant_name",
+        "amount",
+        "category",
+        "confidence",
+        "reviewed",
+        "classification_origin"
+      ],
+      "title": "ResolvedTransaction",
+      "type": "object"
+    },
     "CleanTransaction": {
       "$defs": {
         "CategoryEnum": {
@@ -34,7 +148,7 @@
         }
       },
       "additionalProperties": false,
-      "description": "Represents a normalized transaction extracted from raw notification text.\n\nAttributes:\n    merchant_name: Human-readable merchant name with branch codes and noisy\n        payment processor fragments removed.\n    amount: Positive transaction amount in localized dollar units.\n    category: Strict transaction category selected from CategoryEnum.",
+      "description": "Represents the validated category proposal returned by the LLM.\n\nConfidence measures certainty that ``category`` is correct for the\nnormalized merchant and notification event. It does not measure confidence\nin amount parsing or overall response quality.",
       "properties": {
         "merchant_name": {
           "minLength": 1,
@@ -48,19 +162,27 @@
         },
         "category": {
           "$ref": "#/$defs/CategoryEnum"
+        },
+        "confidence": {
+          "description": "LLM certainty from 0 through 1 that the selected category is correct for this merchant and transaction event.",
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
         }
       },
       "required": [
         "merchant_name",
         "amount",
-        "category"
+        "category",
+        "confidence"
       ],
-      "title": "CleanTransaction",
+      "title": "LlmClassification",
       "type": "object"
     },
     "TransactionWebhook": {
       "additionalProperties": false,
-      "description": "Represents the exact inbound payload sent from MacroDroid.\n\nAttributes:\n    notification_title: Raw notification title captured from the Android BMO\n        notification, expected to contain the establishment name.\n    notification_text: Raw notification body captured from the Android BMO\n        notification, expected to contain the card and amount details.\n    timestamp: Timestamp attached to the captured notification. Accepts ISO\n        8601 datetimes, Unix seconds, or Unix milliseconds.\n\nRaises:\n    ValueError: If timestamp is not timezone-aware or cannot be normalized.",
+      "description": "Represents the exact inbound payload sent from the Android client.\n\nAttributes:\n    notification_title: Raw notification title captured from the Google\n        Wallet notification, expected to contain the establishment name.\n    notification_text: Raw notification body captured from the Google Wallet\n        notification, expected to contain the card and amount details.\n    timestamp: Timestamp attached to the captured notification. Accepts ISO\n        8601 datetimes, Unix seconds, or Unix milliseconds.\n\nRaises:\n    ValueError: If timestamp is not timezone-aware or cannot be normalized.",
       "properties": {
         "notification_title": {
           "minLength": 1,

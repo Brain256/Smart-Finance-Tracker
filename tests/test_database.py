@@ -15,7 +15,7 @@ from src.core.database import (
     is_duplicate_transaction_error,
     upsert_expense_transaction,
 )
-from src.schemas.transaction import CategoryEnum, CleanTransaction
+from src.schemas.transaction import CategoryEnum, ResolvedTransaction
 
 
 class CapturedUpsert(TypedDict):
@@ -143,16 +143,19 @@ class FakeSupabaseClient:
         return FakeRequestBuilder(self.captured, self.error)
 
 
-def clean_transaction() -> CleanTransaction:
-    """Builds a representative clean transaction for persistence tests.
+def resolved_transaction() -> ResolvedTransaction:
+    """Builds a representative resolved transaction for persistence tests.
 
     Returns:
-        A CleanTransaction ready for database helper calls.
+        A metadata-bearing ResolvedTransaction ready for persistence.
     """
-    return CleanTransaction(
+    return ResolvedTransaction(
         merchant_name="Tim Hortons",
         amount=14.50,
         category=CategoryEnum.FOOD,
+        confidence=0.91,
+        reviewed=True,
+        classification_origin="llm",
     )
 
 
@@ -165,14 +168,11 @@ def transaction_timestamp() -> datetime:
     return datetime(2026, 6, 17, 20, 55, tzinfo=UTC)
 
 
-def test_build_expense_upsert_payload_serializes_transaction() -> None:
-    """Verifies CleanTransaction and timestamp map to the expenses row shape.
-
-    Returns:
-        None.
-    """
+def test_build_expense_upsert_payload_serializes_resolved_transaction() -> None:
+    """Verifies resolved metadata maps to the expanded expenses row shape."""
     payload = build_expense_upsert_payload(
-        clean_transaction(),
+        resolved_transaction(),
+        transaction_timestamp(),
         transaction_timestamp(),
     )
 
@@ -181,6 +181,10 @@ def test_build_expense_upsert_payload_serializes_transaction() -> None:
         "amount": 14.50,
         "category": "Food",
         "timestamp": "2026-06-17T20:55:00+00:00",
+        "confidence": 0.91,
+        "reviewed": True,
+        "classified_at": "2026-06-17T20:55:00+00:00",
+        "classification_origin": "llm",
     }
 
 
@@ -220,33 +224,88 @@ def test_is_duplicate_transaction_error_rejects_other_api_errors() -> None:
     assert not is_duplicate_transaction_error(error)
 
 
+class FakeCorrectionLookupResponse:
+    """Supplies the response shape returned by the correction RPC."""
+
+    def __init__(self, data: list[dict[str, str]] | None) -> None:
+        self.data = data
+
+
+class FakeCorrectionLookupBuilder:
+    """Returns a predetermined correction RPC response."""
+
+    def __init__(self, data: list[dict[str, str]] | None) -> None:
+        self.data = data
+
+    async def execute(self) -> FakeCorrectionLookupResponse:
+        return FakeCorrectionLookupResponse(self.data)
+
+
+class FakeCorrectionLookupClient:
+    """Captures correction RPC requests without accessing Supabase."""
+
+    def __init__(self, data: list[dict[str, str]] | None) -> None:
+        self.data = data
+        self.calls: list[tuple[str, dict[str, str]]] = []
+
+    def rpc(
+        self,
+        function_name: str,
+        arguments: dict[str, str],
+    ) -> FakeCorrectionLookupBuilder:
+        self.calls.append((function_name, arguments))
+        return FakeCorrectionLookupBuilder(self.data)
+
+
+def test_resolve_latest_correction_returns_the_rpc_category(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Maps the authoritative correction-lookup RPC hit to a category enum."""
+    fake_client = FakeCorrectionLookupClient([{"corrected_category": "Bills"}])
+
+    async def fake_get_supabase_client() -> FakeCorrectionLookupClient:
+        return fake_client
+
+    monkeypatch.setattr(database, "get_supabase_client", fake_get_supabase_client)
+
+    assert asyncio.run(database.resolve_latest_correction("  TIM   HORTONS  ")) == (
+        CategoryEnum.BILLS
+    )
+    assert fake_client.calls == [
+        ("resolve_latest_correction", {"p_merchant_name": "  TIM   HORTONS  "})
+    ]
+
+
+def test_resolve_latest_correction_preserves_a_no_match(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Treats an empty RPC result as no learned correction rather than an error."""
+    fake_client = FakeCorrectionLookupClient([])
+
+    async def fake_get_supabase_client() -> FakeCorrectionLookupClient:
+        return fake_client
+
+    monkeypatch.setattr(database, "get_supabase_client", fake_get_supabase_client)
+
+    assert asyncio.run(database.resolve_latest_correction("Tim Hortons")) is None
+
+
 def test_upsert_expense_transaction_uses_composite_conflict_target(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verifies the persistence helper performs the expected async upsert.
-
-    Args:
-        monkeypatch: Pytest fixture used to replace the Supabase client factory.
-
-    Returns:
-        None.
-    """
+    """Verifies the persistence helper writes all resolved metadata."""
     captured: list[CapturedUpsert] = []
     fake_client = FakeSupabaseClient(captured)
 
     async def fake_get_supabase_client() -> FakeSupabaseClient:
-        """Returns the fake Supabase client for the persistence helper.
-
-        Returns:
-            A FakeSupabaseClient instance.
-        """
         return fake_client
 
     monkeypatch.setattr(database, "get_supabase_client", fake_get_supabase_client)
 
     status = asyncio.run(
         upsert_expense_transaction(
-            clean_transaction(),
+            resolved_transaction(),
+            transaction_timestamp(),
             transaction_timestamp(),
         )
     )
@@ -260,6 +319,10 @@ def test_upsert_expense_transaction_uses_composite_conflict_target(
                 "amount": 14.50,
                 "category": "Food",
                 "timestamp": "2026-06-17T20:55:00+00:00",
+                "confidence": 0.91,
+                "reviewed": True,
+                "classified_at": "2026-06-17T20:55:00+00:00",
+                "classification_origin": "llm",
             },
             "on_conflict": TRANSACTION_CONFLICT_TARGET,
         }
@@ -269,14 +332,7 @@ def test_upsert_expense_transaction_uses_composite_conflict_target(
 def test_upsert_expense_transaction_suppresses_duplicate_collision(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verifies unique-constraint collisions are returned as duplicate status.
-
-    Args:
-        monkeypatch: Pytest fixture used to replace the Supabase client factory.
-
-    Returns:
-        None.
-    """
+    """Verifies unique-constraint collisions retain deferred retry behavior."""
     duplicate_error = APIError(
         {
             "message": "duplicate key value violates unique constraint",
@@ -288,18 +344,14 @@ def test_upsert_expense_transaction_suppresses_duplicate_collision(
     fake_client = FakeSupabaseClient([], duplicate_error)
 
     async def fake_get_supabase_client() -> FakeSupabaseClient:
-        """Returns a fake client that raises a duplicate-key error.
-
-        Returns:
-            A FakeSupabaseClient configured with a duplicate APIError.
-        """
         return fake_client
 
     monkeypatch.setattr(database, "get_supabase_client", fake_get_supabase_client)
 
     status = asyncio.run(
         upsert_expense_transaction(
-            clean_transaction(),
+            resolved_transaction(),
+            transaction_timestamp(),
             transaction_timestamp(),
         )
     )

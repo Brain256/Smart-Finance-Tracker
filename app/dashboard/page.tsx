@@ -18,7 +18,7 @@ export default async function DashboardPage() {
               <WalletCards aria-hidden="true" className="h-5 w-5" />
             </div>
             <div className="min-w-0">
-              <p className="text-sm font-medium text-[var(--muted)]">BMO activity</p>
+              <p className="text-sm font-medium text-[var(--muted)]">Card activity</p>
               <h1 className="truncate text-2xl font-semibold tracking-normal text-slate-950">
                 Smart Finance Tracker
               </h1>
@@ -44,8 +44,15 @@ export default async function DashboardPage() {
         ) : null}
 
         <DashboardClient
+          accuracy={dashboardData.accuracy}
+          budgets={dashboardData.budgets}
           canDelete={!dashboardData.isDemoData}
           expenses={dashboardData.expenses}
+          financeTimezone={dashboardData.financeTimezone}
+          incomeRecords={dashboardData.incomeRecords}
+          reviewThreshold={dashboardData.reviewThreshold}
+          savingsTarget={dashboardData.savingsTarget}
+          trend={dashboardData.trend}
         />
       </div>
     </main>

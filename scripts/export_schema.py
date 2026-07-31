@@ -14,6 +14,8 @@ sys.path.insert(0, str(ROOT_DIR))
 from src.schemas.transaction import (  # noqa: E402
     CategoryEnum,
     CleanTransaction,
+    LlmClassification,
+    ResolvedTransaction,
     TransactionWebhook,
 )
 
@@ -29,6 +31,8 @@ def build_schema_blueprint() -> dict[str, object]:
         "title": "Smart Finance Tracker Data Contracts",
         "schemas": {
             "CategoryEnum": TypeAdapter(CategoryEnum).json_schema(),
+            "LlmClassification": LlmClassification.model_json_schema(),
+            "ResolvedTransaction": ResolvedTransaction.model_json_schema(),
             "CleanTransaction": CleanTransaction.model_json_schema(),
             "TransactionWebhook": TransactionWebhook.model_json_schema(),
         },

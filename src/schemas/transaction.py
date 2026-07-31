@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -28,14 +29,12 @@ class CategoryEnum(str, Enum):
     MISCELLANEOUS = "Miscellaneous"
 
 
-class CleanTransaction(BaseModel):
-    """Represents a normalized transaction extracted from raw notification text.
+class LlmClassification(BaseModel):
+    """Represents the validated category proposal returned by the LLM.
 
-    Attributes:
-        merchant_name: Human-readable merchant name with branch codes and noisy
-            payment processor fragments removed.
-        amount: Positive transaction amount in localized dollar units.
-        category: Strict transaction category selected from CategoryEnum.
+    Confidence measures certainty that ``category`` is correct for the
+    normalized merchant and notification event. It does not measure confidence
+    in amount parsing or overall response quality.
     """
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -43,15 +42,41 @@ class CleanTransaction(BaseModel):
     merchant_name: str = Field(min_length=1)
     amount: float = Field(gt=0)
     category: CategoryEnum
+    confidence: float = Field(
+        ge=0,
+        le=1,
+        allow_inf_nan=False,
+        description=(
+            "LLM certainty from 0 through 1 that the selected category is "
+            "correct for this merchant and transaction event."
+        ),
+    )
+
+
+class ResolvedTransaction(LlmClassification):
+    """Represents an LLM classification after category-resolution metadata.
+
+    A correction lookup may replace ``category`` while retaining the original
+    LLM ``confidence``. The resolution process records both whether review is
+    complete and which source supplied the stored category.
+    """
+
+    reviewed: bool
+    classification_origin: Literal["llm", "correction_lookup"]
+
+
+# Preserve the original public DTO name for existing callers until they migrate
+# to the explicit LlmClassification name.
+CleanTransaction = LlmClassification
 
 
 class TransactionWebhook(BaseModel):
-    """Represents the exact inbound payload sent from MacroDroid.
+    """Represents the exact inbound payload sent from the Android client.
 
     Attributes:
-        notification_title: Raw notification title captured from the Android BMO
-            notification, expected to contain the establishment name.
-        notification_text: Raw notification body captured from the Android BMO
+        notification_title: Raw notification title captured from the Google
+            Wallet notification, expected to contain the establishment name.
+        notification_text: Raw notification body captured from the Google Wallet
             notification, expected to contain the card and amount details.
         timestamp: Timestamp attached to the captured notification. Accepts ISO
             8601 datetimes, Unix seconds, or Unix milliseconds.
@@ -69,7 +94,7 @@ class TransactionWebhook(BaseModel):
     @field_validator("timestamp", mode="before")
     @classmethod
     def normalize_unix_timestamp(cls, value: object) -> object:
-        """Converts MacroDroid Unix timestamp values into UTC datetimes.
+        """Converts inbound Unix timestamp values into UTC datetimes.
 
         Args:
             value: Raw inbound timestamp value before Pydantic datetime parsing.

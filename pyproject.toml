@@ -10,11 +10,13 @@ dependencies = [
     "pydantic",
     "python-dotenv",
     "supabase",
+    "tzdata==2025.2",
     "uvicorn",
 ]
 
 [project.optional-dependencies]
 dev = [
+    "hypothesis",
     "pytest",
 ]
 

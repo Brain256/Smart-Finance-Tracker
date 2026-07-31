@@ -9,7 +9,7 @@ from instructor import AsyncInstructor
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
-from src.schemas.transaction import CleanTransaction
+from src.schemas.transaction import LlmClassification
 
 GROQ_BASE_URL: Final[str] = "https://api.groq.com/openai/v1"
 DEFAULT_GROQ_MODEL: Final[str] = "llama-3.3-70b-versatile"
@@ -27,6 +27,10 @@ Rules:
 - Convert merchant examples like "TIM HORTONS #4920" to "Tim Hortons".
 - Use the absolute dollar value shown in the notification body for amount.
 - Select exactly one category from the allowed enum values.
+- Set confidence to a finite number from 0 through 1 inclusive.
+- Confidence means certainty that the selected category is correct for this
+  merchant and transaction event; it is not confidence in amount parsing or
+  response quality.
 - Use "Income" only for deposits, payroll, refunds, credits, or received funds.
 - Use "Miscellaneous" when the merchant or category is genuinely ambiguous.
 """.strip()
@@ -49,7 +53,7 @@ def _build_instructor_client() -> AsyncInstructor:
 
     openai_client = AsyncOpenAI(api_key=api_key, base_url=GROQ_BASE_URL)
 
-    # Instructor enforces the CleanTransaction response schema at the client edge.
+    # Instructor enforces the LlmClassification response schema at the client edge.
     return instructor.from_openai(openai_client)
 
 
@@ -95,17 +99,18 @@ def _build_extraction_messages(
 async def extract_transaction_entities(
     notification_title: str,
     notification_text: str,
-) -> CleanTransaction:
-    """Extracts normalized transaction entities from notification title/body.
+) -> LlmClassification:
+    """Extracts an LLM category classification from notification title/body.
 
     Args:
-        notification_title: Mobile banking notification title captured from
-            MacroDroid.
-        notification_text: Mobile banking notification body captured from
-            MacroDroid.
+        notification_title: Google Wallet notification title captured by the
+            Android client.
+        notification_text: Google Wallet notification body captured by the
+            Android client.
 
     Returns:
-        A CleanTransaction object validated against the internal DTO schema.
+        An LlmClassification with finite category confidence validated against
+        the structured response schema.
 
     Raises:
         RuntimeError: If the Groq API key is not configured.
@@ -115,7 +120,7 @@ async def extract_transaction_entities(
 
     return await client.chat.completions.create(
         model=_get_model_name(),
-        response_model=CleanTransaction,
+        response_model=LlmClassification,
         messages=_build_extraction_messages(notification_title, notification_text),
         temperature=0,
         max_retries=2,

@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-from src.schemas.transaction import CleanTransaction
+from src.schemas.transaction import LlmClassification, ResolvedTransaction
 
 
 class HealthResponse(BaseModel):
@@ -26,11 +26,12 @@ class IngestAcceptedResponse(BaseModel):
     Attributes:
         status: Static acceptance marker for successfully validated requests.
         timestamp: The parsed notification timestamp received from the phone.
-        transaction: Normalized transaction entities extracted from the raw text.
+        transaction: The LLM classification or the resolved transaction returned
+            after correction lookup. Resolved responses include review metadata.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     status: Literal["accepted"]
     timestamp: datetime
-    transaction: CleanTransaction
+    transaction: ResolvedTransaction | LlmClassification

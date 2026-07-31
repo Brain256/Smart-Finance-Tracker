@@ -5,7 +5,7 @@ import asyncio
 import pytest
 from openai.types.chat import ChatCompletionMessageParam
 
-from src.schemas.transaction import CategoryEnum, CleanTransaction
+from src.schemas.transaction import CategoryEnum, CleanTransaction, LlmClassification
 from src.services import ai_extractor
 
 
@@ -59,6 +59,7 @@ class FakeCompletions:
             merchant_name="Tim Hortons",
             amount=14.50,
             category=CategoryEnum.FOOD,
+            confidence=0.91,
         )
 
 
@@ -124,16 +125,17 @@ def test_extract_transaction_entities_requests_clean_transaction(
         )
     )
 
-    assert transaction == CleanTransaction(
+    assert transaction == LlmClassification(
         merchant_name="Tim Hortons",
         amount=14.50,
         category=CategoryEnum.FOOD,
+        confidence=0.91,
     )
     assert len(completions.calls) == 1
 
     call = completions.calls[0]
     assert call["model"] == "test-model"
-    assert call["response_model"] is CleanTransaction
+    assert call["response_model"] is LlmClassification
     assert call["temperature"] == 0
     assert call["max_retries"] == 2
 
@@ -141,7 +143,10 @@ def test_extract_transaction_entities_requests_clean_transaction(
     assert isinstance(messages, list)
     assert messages[0]["role"] == "system"
     assert "notification title as the source of truth" in str(messages[0]["content"])
-    assert "notification body as the source of truth" in str(messages[0]["content"])
+    assert "confidence to a finite number from 0 through 1" in str(
+        messages[0]["content"]
+    )
+    assert "selected category is correct" in str(messages[0]["content"])
     assert messages[1] == {
         "role": "user",
         "content": (

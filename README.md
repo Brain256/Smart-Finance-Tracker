@@ -1,239 +1,222 @@
 # Smart Finance Tracker
 
-Smart Finance Tracker is a FastAPI ingestion pipeline for banking push
-notifications. It accepts authenticated webhook payloads from a companion native
-Android client app (`AndroidClient/`), validates their shape with Pydantic,
-extracts clean transaction data through an Instructor/Groq AI layer, and stores
-idempotent records in Supabase Postgres.
+**Turns a Google Wallet tap-to-pay notification into a categorized, queryable
+expense row in Postgres — in about a second, with no bank API, no screen
+scraping, and no third-party aggregator.**
 
-> **Note:** The capture layer is now the custom Android client in
-> [`AndroidClient/`](AndroidClient/). The previous MacroDroid-based setup is
-> deprecated and has been replaced — see [Android Client Setup](#android-client-setup).
+![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
+![Next.js](https://img.shields.io/badge/Next.js-App_Router-000000?logo=nextdotjs&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
+![Kotlin](https://img.shields.io/badge/Kotlin-Android-7F52FF?logo=kotlin&logoColor=white)
+![Supabase](https://img.shields.io/badge/Supabase-Postgres-3FCF8E?logo=supabase&logoColor=white)
 
-## Current Functionality
+**Live demo:** _(deployment URL — TODO)_
 
-- `GET /api/v1/health`
-  - Returns `{"status": "healthy"}` when the API is reachable.
-- `POST /api/v1/ingest`
-  - Requires `Authorization: Bearer <INBOUND_SECRET_TOKEN>`.
-  - Accepts this payload shape:
-    ```json
-    {
-      "notification_title": "Tim Hortons",
-      "notification_text": "BMO Credit Card ending in 1234: Approved $14.50",
-      "timestamp": "1782057637417"
-    }
-    ```
-  - `timestamp` may be an ISO 8601 datetime, a Unix timestamp in seconds, or a
-    Unix timestamp in milliseconds.
-  - Extracts a `merchant_name`, `amount`, and strict `category`.
-  - Upserts the clean transaction into Supabase table `expenses`.
-  - Returns HTTP `202 Accepted` when a transaction is processed and stored.
-  - Returns HTTP `200 OK` if a duplicate transaction collision is treated as a
-    successful retry.
-  - Logs extracted transaction JSON in the Uvicorn server terminal.
-- `GET /dashboard`
-  - Displays a private Next.js dashboard for stored Supabase transactions.
-  - Protected by Auth.js Google OAuth and an `AUTH_ALLOWED_EMAIL` allowlist.
-  - Shows spending totals for today, this week, and this month.
-  - Includes overview, calendar, and transactions tabs.
-  - Renders pie charts for spending by merchant/location and category.
-  - Provides sortable transaction columns for date, merchant, category, and amount.
+## Screenshots
 
-Successful response shape:
+<!--
+  Drop three PNGs into docs/images/ with exactly these filenames:
+    dashboard-overview.png      — Overview tab: spending cards, trend, budgets
+    dashboard-transactions.png  — Transactions tab: sortable table, category edit
+    dashboard-settings.png      — Settings tab: income, savings target, budgets
+-->
 
-```json
-{
-  "status": "accepted",
-  "timestamp": "2026-06-17T20:55:00Z",
-  "transaction": {
-    "merchant_name": "Tim Hortons",
-    "amount": 14.5,
-    "category": "Food"
-  }
-}
+| Overview | Transactions |
+| --- | --- |
+| ![Overview tab](docs/images/dashboard-overview.png) | ![Transactions tab](docs/images/dashboard-transactions.png) |
+
+![Settings tab](docs/images/dashboard-settings.png)
+
+## Why it exists
+
+Consumer bank APIs are effectively closed. Aggregators like Plaid are gated
+behind commercial agreements and priced for businesses, not for one person
+tracking their own spending — and handing a third party your banking credentials
+to read data your phone already has is a poor trade.
+
+Google Wallet already pushes a notification for every card transaction it
+handles, naming the merchant and the amount. That is the same event stream,
+delivered for free, in real time, and it works across every card added to the
+wallet rather than one bank at a time. This project treats the Android
+notification shade as the data source: a listener service
+captures the push, a FastAPI gateway validates it, an LLM extracts structured
+fields from the unstructured text, and Postgres stores it idempotently.
+
+## Architecture
+
+```text
+  Card purchase
+       │
+       ▼
+┌──────────────────────┐
+│  Android client      │  NotificationListenerService reads Google Wallet's
+│  (Kotlin)            │  title + body + postTime; offline? → Room queue →
+│                      │  WorkManager drains on reconnect
+└──────────┬───────────┘
+           │  POST /api/v1/ingest   (Bearer token)
+           ▼
+┌──────────────────────┐
+│  FastAPI gateway     │  Bearer auth → Pydantic v2 validation → timestamp normalization
+│  (Vercel serverless) │
+└──────────┬───────────┘
+           │
+           ▼
+┌──────────────────────┐
+│  Groq + instructor   │  Unstructured text → { merchant_name, amount, category, confidence }
+│  (Llama 3.3 70B)     │  Prior user correction for this merchant overrides the LLM
+└──────────┬───────────┘
+           │
+           ▼
+┌──────────────────────┐
+│  Supabase Postgres   │  UPSERT on (merchant_name, amount, timestamp) → replay-safe
+└──────────┬───────────┘
+           │
+           ▼
+┌──────────────────────┐
+│  Next.js dashboard   │  Google OAuth + email allowlist; trends, budgets, projections
+└──────────────────────┘
 ```
 
-## Local Setup
+| Layer | Technology | Responsibility |
+| --- | --- | --- |
+| Capture | Kotlin, Room, WorkManager | Read Google Wallet notifications, queue failures, retry on reconnect |
+| Ingestion | FastAPI, Pydantic v2 | Authenticate, validate, normalize timestamps |
+| Classification | `instructor` + Groq | Extract typed fields from free text; apply learned corrections |
+| Storage | Supabase Postgres | Idempotent writes, correction audit log, analytics RPCs |
+| Dashboard | Next.js App Router, Auth.js, Recharts | Private analytics, review queue, budget planning |
 
-Create and activate a virtual environment:
+## Engineering highlights
+
+**Idempotent ingestion.** Cellular delivery duplicates requests, and the Android
+client retries from its own queue, so the same transaction can arrive several
+times. A composite unique constraint on `(merchant_name, amount, timestamp)`
+turns that into a non-event: ingestion upserts against the constraint, traps the
+collision, and returns `200 OK` for a replay versus `202 Accepted` for a genuinely
+new transaction. Historical rows and charts never shift under a retry.
+→ `src/core/database.py`
+
+**Corrections are the cache.** There is no merchant cache table to keep in sync.
+When you fix a miscategorized merchant, that write lands in an immutable
+`corrections` audit log — and the same log is the lookup source for every future
+expense. `resolve_latest_correction` matches on a normalized merchant key (a
+stored generated column, so legacy rows participate) and overrides the LLM before
+insert. One table serves as both the audit trail and the learned-category store,
+and a correction hit deliberately *retains* the original LLM confidence so the
+accuracy metric keeps measuring the model rather than flattering it.
+→ `supabase/migrations/002_corrections_and_rpcs.sql`
+
+**Integer-cents arithmetic.** Floating-point dollars drift, and drift in a
+financial total is a bug you find months later. Amounts convert to integer cents
+at the data boundary; every comparison, sum, and budget threshold runs in cents;
+conversion back to dollars happens only at render.
+→ `lib/finance-analytics.ts`
+
+**Timezone-correct financial dates.** "Today's spending" is ambiguous across a
+serverless worker in one region, a Postgres instance in another, and a browser in
+a third. A single `FINANCE_TIMEZONE` drives every day/week/month boundary in all
+three: `zoneinfo` validates it in Python, `Intl.DateTimeFormat` in TypeScript, and
+SQL RPCs receive it as a parameter. A malformed value fails loudly instead of
+silently shifting a month boundary.
+→ `lib/finance-config.ts`, `src/core/finance_config.py`
+
+**Graceful capability degradation.** Each optional dashboard read resolves to
+`{ status: 'ready', data } | { status: 'unavailable', reason }`. A missing
+migration disables exactly the panel that depends on it, with a named reason,
+while real expense data stays visible — instead of a blank page or, worse, a
+confident `$0`.
+→ `lib/dashboard-data.ts`
+
+**Offline-durable capture.** A tap-to-pay notification arrives once; if the POST fails there
+is no second chance from the OS. Failed requests persist to a Room table and
+drain through a `WorkManager` job constrained to `NetworkType.CONNECTED`, so a
+purchase made in airplane mode still lands in Postgres on reconnect.
+→ `AndroidClient/app/src/main/java/com/finance/androidclient/worker/NotificationSyncWorker.kt`
+
+## Testing
 
 ```powershell
+python -m pytest      # 51 passed — ingestion, schemas, AI layer, database
+npx.cmd vitest run    # 75 passed — analytics, data loading, server actions, UI
+```
+
+Groq and Supabase are mocked throughout, so the full suite runs with no network
+access and no API keys.
+
+Beyond example-based tests, the correctness-critical logic is covered by
+property-based tests — Hypothesis on the Python side
+(`tests/test_analytics_properties.py`) and fast-check on the TypeScript side
+(`lib/finance-analytics.properties.test.ts`), 100 generated examples each. These
+assert invariants rather than fixtures: income never leaks into a spending
+aggregate, cents-based sums never drift, budget state bands never overlap, and
+configuration parsing either yields a valid value or raises.
+
+## Getting started
+
+**Prerequisites:** Python 3.11+, Node.js 18+, a Supabase project, a Groq API key.
+
+```powershell
+git clone <repo-url>
+cd Smart-Finance-Tracker
+
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-```
-
-Install runtime and test dependencies:
-
-```powershell
 python -m pip install -e .[dev]
-```
 
-Create your local environment file:
+npm.cmd install
 
-```powershell
 Copy-Item .env.example .env
 ```
 
-Generate a strong inbound token:
+Generate the two secrets and paste them into `.env`:
 
 ```powershell
-python -c "import secrets; print(secrets.token_urlsafe(32))"
+python -c "import secrets; print(secrets.token_urlsafe(32))"   # INBOUND_SECRET_TOKEN
+npx auth secret                                                 # AUTH_SECRET
 ```
 
-Paste that value into `.env`:
+### Environment variables
 
-```text
-INBOUND_SECRET_TOKEN=your-generated-token
-GROQ_API_KEY=your-groq-api-key
-GROQ_MODEL=llama-3.3-70b-versatile
-AUTH_SECRET=your-generated-auth-secret
-AUTH_GOOGLE_ID=your-google-oauth-client-id
-AUTH_GOOGLE_SECRET=your-google-oauth-client-secret
-AUTH_ALLOWED_EMAIL=your.email@gmail.com
-SUPABASE_URL=https://your-project-ref.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-```
+| Variable | Used by | Default | Purpose |
+| --- | --- | --- | --- |
+| `INBOUND_SECRET_TOKEN` | FastAPI | — | Bearer token the Android client must present |
+| `GROQ_API_KEY` | FastAPI | — | Classification API key |
+| `GROQ_MODEL` | FastAPI | `llama-3.3-70b-versatile` | Optional model override |
+| `SUPABASE_URL` | Both | — | Project URL from **Project Settings → API** |
+| `SUPABASE_SERVICE_ROLE_KEY` | Both | — | Server-only; bypasses row-level security |
+| `FINANCE_TIMEZONE` | Both | `America/Toronto` | IANA zone driving every date boundary |
+| `REVIEW_THRESHOLD` | Both | `0.70` | Confidence below this flags an expense for review |
+| `AUTH_SECRET` | Next.js | — | Auth.js session secret |
+| `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | Next.js | — | Google OAuth credentials |
+| `AUTH_ALLOWED_EMAIL` | Next.js | — | The single address permitted to sign in |
 
-`GROQ_MODEL` is optional; the app defaults to `llama-3.3-70b-versatile`.
-`AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, and
-`AUTH_ALLOWED_EMAIL` protect the dashboard login and should be set locally and
-in Vercel Project Settings. Generate `AUTH_SECRET` with:
+Set `FINANCE_TIMEZONE` and `REVIEW_THRESHOLD` **identically** in both runtimes.
+Never prefix any of these with `NEXT_PUBLIC_` — the service role key bypasses
+row-level security and must stay server-side.
+
+For Google OAuth, register the redirect URI
+`https://your-domain.vercel.app/api/auth/callback/google` (and
+`http://localhost:3000/api/auth/callback/google` for local testing) in the Google
+Cloud Console.
+
+### Database
+
+For a **new, empty Supabase project**, run
+[`supabase/expenses.sql`](supabase/expenses.sql) once in the SQL Editor — it is
+the complete fresh-install schema.
+
+For an **existing database**, do not run that file. Apply the ordered migrations
+in [`supabase/migrations/`](supabase/migrations/README.md) instead, following
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+
+### Run it
 
 ```powershell
-npx auth secret
+python -m uvicorn api.index:app --reload   # API  → http://127.0.0.1:8000
+npm.cmd run dev                            # Dashboard → http://localhost:3000/dashboard
 ```
 
-In Google Cloud Console, configure this authorized redirect URI for production:
-
-```text
-https://your-vercel-domain.vercel.app/api/auth/callback/google
-```
-
-For local OAuth testing, add:
-
-```text
-http://localhost:3000/api/auth/callback/google
-```
-
-Install frontend dependencies:
-
-```powershell
-npm.cmd install
-```
-
-## Supabase Setup
-
-Create a Supabase project, then configure the `expenses` table.
-
-1. Open your Supabase project dashboard.
-2. Go to **SQL Editor**.
-3. Run the SQL in [supabase/expenses.sql](supabase/expenses.sql):
-
-```sql
-create table if not exists public.expenses (
-  id bigserial primary key,
-  created_at timestamptz not null default now(),
-  merchant_name varchar not null,
-  amount numeric(10, 2) not null,
-  category varchar not null,
-  timestamp timestamptz not null,
-  constraint unique_transaction_signature unique (
-    merchant_name,
-    amount,
-    timestamp
-  )
-);
-```
-
-4. Go to **Project Settings -> API**.
-5. Copy the **Project URL** into `.env` as `SUPABASE_URL`.
-6. Copy the **service_role** key into `.env` as
-   `SUPABASE_SERVICE_ROLE_KEY`.
-
-Keep the service role key private. It bypasses row-level security and should
-only be used by this backend server, never by a frontend client or the Android
-app. The Next.js dashboard uses that key only in server-side code.
-
-The unique constraint on `(merchant_name, amount, timestamp)` is what makes
-phone retry delivery idempotent.
-
-Start the API locally:
-
-```powershell
-python -m uvicorn api.index:app --reload
-```
-
-For phone-to-laptop testing over the same Wi-Fi network, bind the server to all
-local interfaces instead:
-
-```powershell
-python -m uvicorn api.index:app --host 0.0.0.0 --port 8000 --reload
-```
-
-Then find your computer's LAN IP:
-
-```powershell
-ipconfig
-```
-
-Use the IPv4 address on your Wi-Fi adapter, for example:
-
-```text
-http://192.168.1.25:8000/api/v1/ingest
-```
-
-Do not use `127.0.0.1` or `localhost` from the Android client. On the phone,
-those addresses point back to the phone, not your computer.
-
-## Automated Tests
-
-Run the regression suite:
-
-```powershell
-python -m pytest
-```
-
-Expected result:
-
-```text
-18 passed
-```
-
-The suite verifies health checks, bearer-token rejection, invalid payload
-rejection, timezone validation, Unix timestamp normalization, AI extraction
-service calls, DTO validation, Supabase upsert payloads, duplicate collision
-handling, and valid ingestion acceptance.
-
-The automated tests mock Groq and Supabase, so they do not require network
-access or real API keys.
-
-## Manual Local Verification
-
-Start the API:
-
-```powershell
-python -m uvicorn api.index:app --reload
-```
-
-Start the dashboard locally:
-
-```powershell
-npm.cmd run dev
-```
-
-Then open:
-
-```text
-http://localhost:3000/dashboard
-```
-
-If Supabase service credentials are not configured, the dashboard can still
-render with sample transactions for layout verification. `/dashboard` is
-protected by Google OAuth when `AUTH_SECRET`, `AUTH_GOOGLE_ID`,
-`AUTH_GOOGLE_SECRET`, and `AUTH_ALLOWED_EMAIL` are configured.
-
-Send a test request:
+Send a test transaction:
 
 ```powershell
 Invoke-RestMethod `
@@ -248,154 +231,63 @@ Invoke-RestMethod `
   }'
 ```
 
-The Uvicorn terminal should log a normalized transaction:
+The server logs a normalized transaction and a row appears in Supabase:
 
 ```text
 Extracted transaction: {"merchant_name":"Tim Hortons","amount":14.5,"category":"Food"}
 ```
 
-Then open Supabase **Table Editor -> expenses** and confirm a row was inserted.
+### Phone capture
 
-## Android Client Setup
+The capture layer is a native Kotlin app in [`AndroidClient/`](AndroidClient/)
+that forwards Google Wallet notifications to `/api/v1/ingest`. It ships
+allowlisting `com.google.android.apps.walletnfcrel`, so it needs two things:
+`BASE_URL` and `API_TOKEN` set as Gradle properties, and Android's **Notification
+access** permission granted. Full walkthrough in
+[`docs/ANDROID_CLIENT.md`](docs/ANDROID_CLIENT.md).
 
-The capture layer is a native Kotlin Android app in
-[`AndroidClient/`](AndroidClient/) that replaces MacroDroid. It:
+## API
 
-- Runs a `NotificationListenerService` that reads posted notifications from your
-  bank/payment app.
-- Extracts the notification title, body, and timestamp and POSTs them to
-  `/api/v1/ingest` with the `Authorization: Bearer <token>` header.
-- On a failed POST (no internet, server error), caches the request in a local
-  SQLite (Room) table `failed_notifications`.
-- Retries cached requests automatically once connectivity is restored, via a
-  `WorkManager` job constrained to `NetworkType.CONNECTED`.
+| Endpoint | Description |
+| --- | --- |
+| `GET /api/v1/health` | Returns `{"status": "healthy"}` |
+| `POST /api/v1/ingest` | Bearer-authenticated. Accepts `notification_title`, `notification_text`, and `timestamp` (ISO 8601, Unix seconds, or Unix milliseconds). Returns `202` for a new transaction, `200` for a duplicate retry. |
+| `GET /dashboard` | Private Next.js dashboard behind Google OAuth |
 
-Application id: `com.finance.androidclient`. Minimum Android version: API 26.
-
-### Architecture
-
-```
-Bank/Wallet notification
-        │
-        ▼
-MyNotificationListenerService   (reads title + body + postTime)
-        │
-        ▼
-NetworkClient.sendNotification() ──► POST /api/v1/ingest  ──► 202/200  → done
-        │
-        └── failure (offline / 5xx) → Room cache (failed_notifications)
-                                       └► NotificationSyncWorker (CONNECTED)
-                                          drains the cache when internet returns
+```json
+{
+  "status": "accepted",
+  "timestamp": "2026-06-17T20:55:00Z",
+  "transaction": {
+    "merchant_name": "Tim Hortons",
+    "amount": 14.5,
+    "category": "Food"
+  }
+}
 ```
 
-### 1. Enable Bank Notifications On The Phone
+## Project structure
 
-1. Install and sign in to your bank/payment app (e.g. BMO, Google Wallet).
-2. Enable card transaction alerts inside that app.
-3. In Android settings, allow notifications from that app.
-4. Confirm a real transaction notification appears, for example:
-
-   ```text
-   Title: Tim Hortons
-   Body: BMO Credit Card ending in 1234: Approved $14.50
-   ```
-
-### 2. Choose Which App's Notifications To Forward
-
-Open
-[`AndroidClient/app/src/main/java/com/finance/androidclient/service/MyNotificationListenerService.kt`](AndroidClient/app/src/main/java/com/finance/androidclient/service/MyNotificationListenerService.kt)
-and edit the `allowedPackages` set to include your bank app's package name:
-
-```kotlin
-val allowedPackages = setOf(
-    "com.google.android.apps.walletnfcrel", // Google Wallet
-    "com.android.shell"                     // adb-driven test notifications
-    // add your bank app package, e.g. "com.bmo.mobile.banking"
-)
+```text
+api/              FastAPI entrypoint (Vercel serverless handler)
+src/
+  core/           Security, database client, finance configuration
+  schemas/        Pydantic v2 request/response contracts
+  services/       LLM extraction layer
+app/              Next.js App Router — dashboard, auth, server actions
+components/       React UI, including the finance panel components
+lib/              Analytics, data loading, mutations, shared types
+supabase/         Fresh-install schema plus ordered migrations
+AndroidClient/    Kotlin notification capture app
+tests/            Python test suite (pytest + Hypothesis)
+docs/             Architecture, deployment, Android setup, roadmap
 ```
 
-To find an app's exact package name, run `adb shell pm list packages` (or use an
-app-info viewer). Notifications from any package not in this set are ignored. The
-listener also skips any notification whose text does not contain `$` (except
-`com.android.shell`, kept for testing).
+## Documentation
 
-### 3. Configure The Endpoint And Token
-
-`BASE_URL` and `API_TOKEN` are compiled into the app as `BuildConfig` fields.
-The build reads them from environment variables **or** Gradle properties, so put
-them where they stay out of version control — the simplest is your user-level
-Gradle properties file at `~/.gradle/gradle.properties`:
-
-```properties
-BASE_URL=https://your-vercel-domain.vercel.app
-API_TOKEN=YOUR_INBOUND_SECRET_TOKEN
-```
-
-Notes:
-
-- `API_TOKEN` must exactly match `INBOUND_SECRET_TOKEN` from the backend `.env`.
-- `BASE_URL` must **not** end with a slash; the client appends `/api/v1/ingest`.
-- For same-Wi-Fi local testing, use your computer's LAN IP, e.g.
-  `http://192.168.1.25:8000` (see the local-testing note below about cleartext).
-
-### 4. Build And Install
-
-Open the `AndroidClient` folder in Android Studio and click **Run**, or build
-from the command line (Android Studio's bundled JDK works well):
-
-```powershell
-cd AndroidClient
-.\gradlew.bat :app:installDebug
-```
-
-If Gradle reports it cannot find Java, point `JAVA_HOME` at the Android Studio
-JDK first, for example:
-
-```powershell
-$env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
-```
-
-### 5. Grant Notification Access
-
-Launch the app once. It is headless: it opens the system **Notification access**
-screen and then closes. Toggle access **on** for this app. Android needs this
-special grant before the listener receives any notifications.
-
-To verify it later: **Settings -> Notification access** should show this app
-enabled.
-
-### 6. Confirm The End-To-End Result
-
-Trigger a matching transaction notification. On success the backend responds
-`202 Accepted` (new) or `200 OK` (duplicate retry), and a row appears in Supabase
-**Table Editor -> expenses**.
-
-To verify the offline fallback:
-
-1. Put the phone in airplane mode.
-2. Trigger a matching notification. The POST fails and the request is stored in
-   the `failed_notifications` table.
-3. Turn connectivity back on. `NotificationSyncWorker` runs and drains the cache;
-   the row disappears and the transaction lands in Supabase.
-
-You can inspect the local SQLite table live with Android Studio's
-**App Inspection -> Database Inspector** while the app is running.
-
-### Troubleshooting
-
-- **Nothing is captured:** notification access is not granted, or the source
-  app's package is not in `allowedPackages`.
-- **HTTP `401`:** `API_TOKEN` does not match the backend `INBOUND_SECRET_TOKEN`.
-- **HTTP `422`:** the payload shape is wrong (should not happen with the stock
-  client).
-- **Offline items never send / the cache never fills:** confirm the Room KSP
-  wiring is intact — `app/build.gradle.kts` must apply the `kotlin.android` and
-  `ksp` plugins and use `ksp(libs.room.compiler)` (not `annotationProcessor`),
-  otherwise the database classes are not generated and the offline insert fails.
-- **Local (`http://`) testing does nothing:** Android blocks cleartext HTTP by
-  default. Production Vercel uses HTTPS and works as-is. For LAN `http://`
-  testing only, temporarily add `android:usesCleartextTraffic="true"` to the
-  `<application>` tag in
-  [`AndroidClient/app/src/main/AndroidManifest.xml`](AndroidClient/app/src/main/AndroidManifest.xml),
-  and make sure the phone and computer share a Wi-Fi network, Uvicorn runs with
-  `--host 0.0.0.0`, and Windows Firewall allows the Python process.
+- [Architecture & design decisions](docs/ARCHITECTURE.md) — why the schema and
+  analytics work the way they do
+- [Deployment runbook](docs/DEPLOYMENT.md) — ordered migrations, verification,
+  rollback
+- [Android client setup](docs/ANDROID_CLIENT.md) — capture layer walkthrough
+- [Roadmap](docs/ROADMAP.md) — shipped and planned expansion work

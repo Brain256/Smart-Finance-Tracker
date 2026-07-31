@@ -6,6 +6,9 @@ __pycache__/
 *.log
 .pytest_cache/
 .ruff_cache/
+.hypothesis/
+*.egg-info/
+.agents/
 node_modules/
 .next/
 out/
