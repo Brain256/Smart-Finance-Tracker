@@ -1,16 +1,6 @@
 "use client";
 
-import {
-  CalendarDays,
-  Clock3,
-  LineChart as LineChartIcon,
-  MapPin,
-  PieChart as PieChartIcon,
-  Scale,
-  ShieldCheck,
-  TrendingUp,
-  Wallet
-} from "lucide-react";
+import { LineChart as LineChartIcon, MapPin } from "lucide-react";
 import {
   CartesianGrid,
   Cell,
@@ -25,24 +15,20 @@ import {
 } from "recharts";
 
 import {
-  getBudgetProgress,
   getFinanceDateKey,
-  getNetCashFlow,
+  getPeriodPacing,
   getPeriodMetrics,
   getPlanningLimits,
-  getProjection,
   isSpendingExpense,
-  type BudgetProgress
+  type PlanningPrerequisite
 } from "@/lib/finance-analytics";
+import { SpendingBudgetPanel } from "@/components/finance/spending-budget-panel";
 import { formatCompactCurrency, formatCurrency, formatDate } from "@/lib/format";
 import type {
-  CategoryBudget,
   ChartDatum,
-  ClassificationAccuracy,
   ExpenseRecord,
   FeatureLoadState,
   IncomeRecord,
-  ProjectionPrerequisite,
   SavingsTarget,
   TrendPoint
 } from "@/lib/types";
@@ -50,23 +36,14 @@ import type {
 type OverviewPanelProps = {
   expenses: ExpenseRecord[];
   financeTimezone: string;
-  budgets: FeatureLoadState<CategoryBudget[]>;
   incomeRecords: FeatureLoadState<IncomeRecord[]>;
   savingsTarget: FeatureLoadState<SavingsTarget | null>;
   trend: FeatureLoadState<TrendPoint[]>;
-  accuracy: FeatureLoadState<ClassificationAccuracy>;
 };
 
 const chartColors = ["#0f766e", "#2563eb", "#d97706", "#dc2626", "#7c3aed", "#0891b2", "#4b5563"];
 
-const budgetStateClasses: Record<BudgetProgress["state"], string> = {
-  green: "bg-emerald-500",
-  yellow: "bg-amber-500",
-  red: "bg-red-500"
-};
-
-const prerequisiteLabels: Record<ProjectionPrerequisite, string> = {
-  budgets: "category budgets",
+const prerequisiteLabels: Record<PlanningPrerequisite, string> = {
   "active-income": "an active income record",
   "savings-target": "a savings target"
 };
@@ -76,7 +53,7 @@ function readyOrNull<T>(state: FeatureLoadState<T>): T | null {
   return state.status === "ready" ? state.data : null;
 }
 
-function listPrerequisites(missing: readonly ProjectionPrerequisite[]): string {
+function listPrerequisites(missing: readonly PlanningPrerequisite[]): string {
   return missing.map((item) => prerequisiteLabels[item]).join(", ");
 }
 
@@ -93,10 +70,6 @@ function groupByTotal(expenses: ExpenseRecord[], getLabel: (expense: ExpenseReco
 function groupSmallSlices(data: ChartDatum[], maxSlices: number): ChartDatum[] {
   if (data.length <= maxSlices) return data;
   return [...data.slice(0, maxSlices - 1), { name: "Other", value: sumChartValues(data.slice(maxSlices - 1)) }];
-}
-
-function MetricCard({ icon, label, value, detail }: { icon: React.ReactNode; label: string; value: number; detail: string }) {
-  return <section className="rounded-lg border border-[var(--border)] bg-white p-4 shadow-sm"><div className="flex items-start justify-between gap-3"><div><p className="text-sm font-medium text-[var(--muted)]">{label}</p><p className="mt-2 text-2xl font-semibold tracking-normal text-slate-950 sm:text-3xl">{formatCurrency(value)}</p></div><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-[var(--panel-soft)] text-[var(--primary)]">{icon}</div></div><p className="mt-3 text-sm text-[var(--muted)]">{detail}</p></section>;
 }
 
 function PanelShell({ icon, title, subtitle, children }: { icon: React.ReactNode; title: string; subtitle: string; children: React.ReactNode }) {
@@ -145,181 +118,39 @@ function SpendingTrendChart({ trend }: { trend: FeatureLoadState<TrendPoint[]> }
   );
 }
 
-function BudgetProgressList({ budgets, progress }: { budgets: FeatureLoadState<CategoryBudget[]>; progress: BudgetProgress[] }) {
-  if (budgets.status === "unavailable") {
-    return <p className="mt-4 border-t border-[var(--border)] pt-4 text-sm text-[var(--muted)]">{budgets.reason}</p>;
-  }
-  if (progress.length === 0) {
-    return <p className="mt-4 border-t border-[var(--border)] pt-4 text-sm text-[var(--muted)]">No category budgets are configured yet.</p>;
-  }
-
-  return (
-    <ul className="mt-4 grid gap-3 border-t border-[var(--border)] pt-4">
-      {progress.map((item) => (
-        <li key={item.category}>
-          <div className="flex items-center justify-between gap-2 text-sm">
-            <span className="font-medium text-slate-800">{item.category}</span>
-            <span className="text-slate-600">
-              {formatCurrency(item.spending)} of {formatCurrency(item.monthlyLimit)}
-              {item.consumption === null ? " (no limit set)" : ` (${Math.round(item.consumption * 100)}%)`}
-            </span>
-          </div>
-          <div
-            aria-label={`${item.category} budget usage`}
-            aria-valuemax={100}
-            aria-valuemin={0}
-            aria-valuenow={item.consumption === null ? 0 : Math.round(item.consumption * 100)}
-            className="mt-1 h-2 w-full overflow-hidden rounded-full bg-slate-100"
-            role="progressbar"
-          >
-            <div
-              className={`h-full rounded-full ${budgetStateClasses[item.state]}`}
-              data-state={item.state}
-              style={{ width: `${Math.min(100, item.consumption === null ? (item.spending > 0 ? 100 : 0) : item.consumption * 100)}%` }}
-            />
-          </div>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function AccuracyPanel({ accuracy }: { accuracy: FeatureLoadState<ClassificationAccuracy> }) {
-  return (
-    <PanelShell
-      icon={<ShieldCheck aria-hidden="true" className="h-4 w-4" />}
-      subtitle="Share of the last 90 days of classifications that were never corrected"
-      title="Classification accuracy"
-    >
-      {accuracy.status === "unavailable" ? (
-        <p className="text-sm text-[var(--muted)]">{accuracy.reason}</p>
-      ) : accuracy.data.accuracy === null ? (
-        <p className="text-sm text-[var(--muted)]">Not enough classified transactions yet to report accuracy.</p>
-      ) : (
-        <div>
-          <p className="text-2xl font-semibold tracking-normal text-slate-950 sm:text-3xl">
-            {`${(accuracy.data.accuracy * 100).toFixed(1)}%`}
-          </p>
-          <p className="mt-2 text-sm text-[var(--muted)]">
-            {`${accuracy.data.correctedCount} corrected of ${accuracy.data.totalClassified} classified since ${accuracy.data.windowStart}`}
-          </p>
-        </div>
-      )}
-    </PanelShell>
-  );
-}
-
-export function OverviewPanel({ expenses, financeTimezone, budgets, incomeRecords, savingsTarget, trend, accuracy }: OverviewPanelProps) {
+export function OverviewPanel({ expenses, financeTimezone, incomeRecords, savingsTarget, trend }: OverviewPanelProps) {
   const calculationDate = getFinanceDateKey(new Date(), financeTimezone);
   const spendingExpenses = expenses.filter(isSpendingExpense);
   const metrics = getPeriodMetrics(expenses, calculationDate, financeTimezone);
-  const netThisMonth = getNetCashFlow(expenses, calculationDate, financeTimezone);
   const limits = getPlanningLimits(readyOrNull(incomeRecords), readyOrNull(savingsTarget), calculationDate);
-  const budgetProgress = getBudgetProgress(expenses, readyOrNull(budgets) ?? [], calculationDate, financeTimezone);
-  const projection = getProjection(
-    expenses,
-    readyOrNull(budgets),
-    readyOrNull(incomeRecords),
-    readyOrNull(savingsTarget),
-    calculationDate,
-    financeTimezone
-  );
+  const periodBudgetUsage = getPeriodPacing(expenses, metrics, limits, calculationDate, financeTimezone);
+  const planningUnavailableReasons = [incomeRecords, savingsTarget]
+    .filter((state): state is { status: "unavailable"; reason: string } => state.status === "unavailable")
+    .map((state) => state.reason);
+  const planningUnavailableReason = planningUnavailableReasons.length > 0 ? planningUnavailableReasons.join(" ") : null;
+  const incompletePlanningMessage = limits.status === "incomplete"
+    ? `Add ${listPrerequisites(limits.missing)} in Settings to compare spending against a budget.`
+    : null;
   const locationChartData = groupSmallSlices(groupByTotal(spendingExpenses, (expense) => expense.merchantName), 6);
   const categoryChartData = groupByTotal(spendingExpenses, (expense) => expense.category);
 
   return (
     <section className="grid gap-5">
-      <div className="grid gap-4 md:grid-cols-3">
-        <MetricCard detail="Local calendar day" icon={<Clock3 aria-hidden="true" className="h-5 w-5" />} label="Spending today" value={metrics.today} />
-        <MetricCard detail="Monday through today" icon={<CalendarDays aria-hidden="true" className="h-5 w-5" />} label="Spending this week" value={metrics.week} />
-        <MetricCard detail="Current calendar month" icon={<Wallet aria-hidden="true" className="h-5 w-5" />} label="Spending this month" value={metrics.month} />
-      </div>
-
-      <div className="grid gap-5 lg:grid-cols-2">
-        <PanelShell
-          icon={<Scale aria-hidden="true" className="h-4 w-4" />}
-          subtitle="Actual recorded income less actual recorded spending; planning settings never change it"
-          title="Net this month"
-        >
-          <p className="text-2xl font-semibold tracking-normal text-slate-950 sm:text-3xl">{formatCurrency(netThisMonth)}</p>
-        </PanelShell>
-
-        <PanelShell
-          icon={<TrendingUp aria-hidden="true" className="h-4 w-4" />}
-          subtitle="Remaining funds projected to the end of the month"
-          title="Cash-flow projection"
-        >
-          {projection.status === "incomplete" ? (
-            <p className="text-sm text-[var(--muted)]">{`Add ${listPrerequisites(projection.missing)} to see a projection.`}</p>
-          ) : (
-            <div>
-              <p className="text-2xl font-semibold tracking-normal text-slate-950 sm:text-3xl">{formatCurrency(projection.value)}</p>
-              <p className="mt-2 text-sm text-[var(--muted)]">
-                {`${formatCurrency(projection.averageDailySpending)} average daily spending over ${projection.daysRemaining} day${projection.daysRemaining === 1 ? "" : "s"} remaining`}
-              </p>
-            </div>
-          )}
-        </PanelShell>
-      </div>
-
-      <PanelShell
-        icon={<Wallet aria-hidden="true" className="h-4 w-4" />}
-        subtitle="Derived from the active income record and savings target"
-        title="Planning limits"
-      >
-        {limits.status === "incomplete" ? (
-          <p className="text-sm text-[var(--muted)]">{`Add ${listPrerequisites(limits.missing)} in Settings to derive spending limits.`}</p>
-        ) : (
-          <dl className="grid gap-4 sm:grid-cols-3">
-            <div>
-              <dt className="text-sm font-medium text-[var(--muted)]">Spendable this period</dt>
-              <dd className="mt-1 text-xl font-semibold text-slate-950">{formatCurrency(limits.spendableThisPeriod)}</dd>
-            </div>
-            <div>
-              <dt className="text-sm font-medium text-[var(--muted)]">Daily limit</dt>
-              <dd className="mt-1 text-xl font-semibold text-slate-950">{formatCurrency(limits.dailyLimit)}</dd>
-            </div>
-            <div>
-              <dt className="text-sm font-medium text-[var(--muted)]">Weekly limit</dt>
-              <dd className="mt-1 text-xl font-semibold text-slate-950">{formatCurrency(limits.weeklyLimit)}</dd>
-            </div>
-          </dl>
-        )}
-      </PanelShell>
+      <SpendingBudgetPanel
+        incompleteMessage={incompletePlanningMessage}
+        limits={limits}
+        planningUnavailableReason={planningUnavailableReason}
+        savingsTarget={readyOrNull(savingsTarget)}
+        usage={periodBudgetUsage}
+      />
 
       <SpendingTrendChart trend={trend} />
 
       <div className="grid gap-5 xl:grid-cols-2">
         <SpendingPieChart data={locationChartData} icon={<MapPin aria-hidden="true" className="h-4 w-4" />} subtitle="Grouped by merchant until a dedicated location field exists" title="Spending by location" />
-        <div className="rounded-lg border border-[var(--border)] bg-white p-4 shadow-sm">
-          <div className="mb-4 flex items-start justify-between gap-3">
-            <div>
-              <h2 className="text-base font-semibold tracking-normal text-slate-950">Spending by category</h2>
-              <p className="text-sm text-[var(--muted)]">Income is excluded from spending allocation</p>
-            </div>
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-700">
-              <PieChartIcon aria-hidden="true" className="h-4 w-4" />
-            </div>
-          </div>
-          {sumChartValues(categoryChartData) > 0 ? (
-            <div className="h-72 min-w-0">
-              <ResponsiveContainer height="100%" width="100%">
-                <PieChart>
-                  <Pie data={categoryChartData} dataKey="value" innerRadius="58%" nameKey="name" outerRadius="86%" paddingAngle={2}>
-                    {categoryChartData.map((entry, index) => <Cell fill={chartColors[index % chartColors.length]} key={entry.name} />)}
-                  </Pie>
-                  <Tooltip formatter={(value) => [formatCurrency(Number(value)), "Spent"]} />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-          ) : (
-            <div className="flex h-72 items-center justify-center rounded-md border border-dashed border-[var(--border)] text-sm text-[var(--muted)]">No spending data yet</div>
-          )}
-          <BudgetProgressList budgets={budgets} progress={budgetProgress} />
-        </div>
+        <SpendingPieChart data={categoryChartData} icon={<span aria-hidden="true" className="text-sm">%</span>} subtitle="Income is excluded from spending allocation" title="Spending by category" />
       </div>
 
-      <AccuracyPanel accuracy={accuracy} />
     </section>
   );
 }

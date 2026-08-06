@@ -11,7 +11,6 @@ import { TransactionsPanel } from "@/components/finance/transactions-panel";
 import { addCalendarMonths, getFinanceMonthKey } from "@/lib/finance-analytics";
 import { formatCurrency } from "@/lib/format";
 import type {
-  CategoryBudget,
   ClassificationAccuracy,
   ExpenseRecord,
   FeatureLoadState,
@@ -29,7 +28,6 @@ type DashboardClientProps = {
   expenses: ExpenseRecord[];
   financeTimezone: string;
   reviewThreshold: number;
-  budgets: FeatureLoadState<CategoryBudget[]>;
   incomeRecords: FeatureLoadState<IncomeRecord[]>;
   savingsTarget: FeatureLoadState<SavingsTarget | null>;
   trend: FeatureLoadState<TrendPoint[]>;
@@ -44,7 +42,7 @@ const tabs: Array<{ key: TabKey; label: string }> = [
   { key: "settings", label: "Settings" }
 ];
 
-export function DashboardClient({ canDelete, expenses, financeTimezone, reviewThreshold, budgets, incomeRecords, savingsTarget, trend, accuracy }: DashboardClientProps) {
+export function DashboardClient({ canDelete, expenses, financeTimezone, reviewThreshold, incomeRecords, savingsTarget, trend, accuracy }: DashboardClientProps) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
   const [displayedExpenses, setDisplayedExpenses] = useState(expenses);
@@ -91,5 +89,5 @@ export function DashboardClient({ canDelete, expenses, financeTimezone, reviewTh
     setMonthKey((current) => addCalendarMonths(current, offset));
   };
 
-  return <div className="flex flex-col gap-5" data-finance-timezone={financeTimezone} data-review-threshold={reviewThreshold}><nav aria-label="Dashboard sections" className="grid grid-cols-2 rounded-lg border border-[var(--border)] bg-white p-1 shadow-sm sm:grid-cols-4">{tabs.map((tab) => <button aria-selected={activeTab === tab.key} className={`focus-ring h-10 rounded-md px-2 text-sm font-medium transition ${activeTab === tab.key ? "bg-[var(--primary)] text-white" : "text-slate-600 hover:bg-slate-50"}`} key={tab.key} onClick={() => setActiveTab(tab.key)} role="tab" type="button">{tab.label}</button>)}</nav>{activeTab === "overview" ? <OverviewPanel accuracy={accuracy} budgets={budgets} expenses={displayedExpenses} financeTimezone={financeTimezone} incomeRecords={incomeRecords} savingsTarget={savingsTarget} trend={trend} /> : null}{activeTab === "calendar" ? <CalendarHeatmap activeCellKey={activeCellKey} expenses={displayedExpenses} financeTimezone={financeTimezone} monthKey={monthKey} onActiveCellKeyChange={setActiveCellKey} onChangeMonth={changeMonth} onSelectDate={setSelectedDateKey} selectedDateKey={selectedDateKey} /> : null}{activeTab === "transactions" ? <TransactionsPanel canDelete={canDelete} deleteError={deleteError} deletingExpenseId={deletingExpenseId} expenses={displayedExpenses} financeTimezone={financeTimezone} isDeletePending={isDeletePending} onCorrection={handleCorrection} onDelete={handleDelete} onSortStateChange={setSortState} reviewThreshold={reviewThreshold} sortState={sortState} /> : null}{activeTab === "settings" ? <SettingsPanel budgets={budgets} incomeRecords={incomeRecords} savingsTarget={savingsTarget} /> : null}</div>;
+  return <div className="flex min-w-0 flex-col gap-5" data-finance-timezone={financeTimezone} data-review-threshold={reviewThreshold}><nav aria-label="Dashboard sections" className="grid grid-cols-2 rounded-lg border border-[var(--border)] bg-white p-1 shadow-sm sm:grid-cols-4">{tabs.map((tab) => <button aria-selected={activeTab === tab.key} className={`focus-ring h-10 rounded-md px-2 text-sm font-medium transition ${activeTab === tab.key ? "bg-[var(--primary)] text-white" : "text-slate-600 hover:bg-slate-50"}`} key={tab.key} onClick={() => setActiveTab(tab.key)} role="tab" type="button">{tab.label}</button>)}</nav>{activeTab === "overview" ? <OverviewPanel expenses={displayedExpenses} financeTimezone={financeTimezone} incomeRecords={incomeRecords} savingsTarget={savingsTarget} trend={trend} /> : null}{activeTab === "calendar" ? <CalendarHeatmap activeCellKey={activeCellKey} expenses={displayedExpenses} financeTimezone={financeTimezone} monthKey={monthKey} onActiveCellKeyChange={setActiveCellKey} onChangeMonth={changeMonth} onSelectDate={setSelectedDateKey} selectedDateKey={selectedDateKey} /> : null}{activeTab === "transactions" ? <TransactionsPanel accuracy={accuracy} canDelete={canDelete} deleteError={deleteError} deletingExpenseId={deletingExpenseId} expenses={displayedExpenses} financeTimezone={financeTimezone} isDeletePending={isDeletePending} onCorrection={handleCorrection} onDelete={handleDelete} onSortStateChange={setSortState} reviewThreshold={reviewThreshold} sortState={sortState} /> : null}{activeTab === "settings" ? <SettingsPanel incomeRecords={incomeRecords} savingsTarget={savingsTarget} /> : null}</div>;
 }

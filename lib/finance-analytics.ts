@@ -33,6 +33,25 @@ export type BudgetProgress = {
   state: BudgetProgressState;
 };
 
+export type PeriodBudget = "today" | "week" | "month";
+export type PacingState = "under" | "on" | "ahead";
+export type PeriodBudgetUsage = {
+  period: PeriodBudget;
+  spending: number;
+  budget: number | null;
+  consumption: number | null;
+  state: BudgetProgressState | null;
+  elapsedDays?: number;
+  totalDays?: number;
+  remainingDays?: number;
+  elapsedRatio?: number;
+  averageDailySpending?: number;
+  projectedSpending?: number;
+  projectedConsumption?: number | null;
+  projectedState?: BudgetProgressState | null;
+  pacingState?: PacingState | null;
+};
+
 export type ExpenseFilters = {
   merchantQuery: string;
   category: ExpenseCategory | "all";
@@ -370,7 +389,104 @@ export function getPeriodMetrics(
   };
 }
 
-/** Calculates actual current-month Income transactions less every non-Income transaction. */
+/** Combines period spending totals with the derived daily, weekly, and monthly budgets. */
+export function getPeriodBudgetUsage(
+  metrics: PeriodMetrics,
+  limits: PlanningLimits
+): PeriodBudgetUsage[] {
+  const budgets: Record<PeriodBudget, number | null> = limits.status === "ready"
+    ? { today: limits.dailyLimit, week: limits.weeklyLimit, month: limits.spendableThisPeriod }
+    : { today: null, week: null, month: null };
+  const spending: Record<PeriodBudget, number> = {
+    today: metrics.today,
+    week: metrics.week,
+    month: metrics.month
+  };
+
+  return (["today", "week", "month"] as const).map((period) => {
+    const budget = budgets[period];
+    const spendingCents = amountToCents(spending[period]);
+
+    if (budget === null) {
+      return { period, spending: centsToAmount(spendingCents), budget: null, consumption: null, state: null };
+    }
+
+    const budgetCents = amountToCents(budget);
+    const consumption = budgetCents === 0 ? null : spendingCents / budgetCents;
+    return {
+      period,
+      spending: centsToAmount(spendingCents),
+      budget: centsToAmount(budgetCents),
+      consumption,
+      state: getBudgetState(consumption, spendingCents)
+    };
+  });
+}
+
+
+function getPacingState(consumption: number | null, elapsedRatio: number): PacingState | null {
+  if (consumption === null) return null;
+  const difference = consumption - elapsedRatio;
+  if (difference > 0.1) return "ahead";
+  if (difference < -0.1) return "under";
+  return "on";
+}
+
+/** Adds week/month elapsed time, pacing, and end-of-period forecasts to budget usage. */
+export function getPeriodPacing(
+  expenses: readonly ExpenseRecord[],
+  metrics: PeriodMetrics,
+  limits: PlanningLimits,
+  calculationDate: string,
+  timeZone: string
+): PeriodBudgetUsage[] {
+  const baseUsage = getPeriodBudgetUsage(metrics, limits);
+  const weekElapsedDays = getWeekdayIndex(calculationDate) === 0 ? 7 : getWeekdayIndex(calculationDate);
+  const monthElapsedDays = parseDateKey(calculationDate).day;
+  const monthTotalDays = getDaysInMonth(calculationDate);
+  const trailingAverage = getTrailingAverageSpending(expenses, calculationDate, timeZone);
+  const weekAverage = centsToAmount(amountToCents(metrics.week) / weekElapsedDays);
+
+  return baseUsage.map((usage) => {
+    if (usage.period === "today") {
+      return {
+        ...usage,
+        elapsedDays: weekElapsedDays,
+        totalDays: 7,
+        remainingDays: 7 - weekElapsedDays,
+        elapsedRatio: weekElapsedDays / 7,
+        averageDailySpending: weekAverage,
+        projectedSpending: undefined,
+        projectedConsumption: null,
+        projectedState: null,
+        pacingState: null
+      };
+    }
+
+    const elapsedDays = usage.period === "week" ? weekElapsedDays : monthElapsedDays;
+    const totalDays = usage.period === "week" ? 7 : monthTotalDays;
+    const remainingDays = totalDays - elapsedDays;
+    const projectedSpendingCents = amountToCents(usage.spending) + amountToCents(trailingAverage) * remainingDays;
+    const projectedSpending = centsToAmount(projectedSpendingCents);
+    const projectedBudgetCents = usage.budget === null ? null : amountToCents(usage.budget);
+    const projectedConsumption = projectedBudgetCents === null || projectedBudgetCents === 0
+      ? null
+      : projectedSpendingCents / projectedBudgetCents;
+
+    return {
+      ...usage,
+      elapsedDays,
+      totalDays,
+      remainingDays,
+      elapsedRatio: elapsedDays / totalDays,
+      projectedSpending,
+      projectedConsumption,
+      projectedState: projectedBudgetCents === null ? null : getBudgetState(projectedConsumption, projectedSpendingCents),
+      pacingState: getPacingState(usage.consumption, elapsedDays / totalDays)
+    };
+  });
+}
+
 export function getNetCashFlow(
   expenses: readonly ExpenseRecord[],
   calculationDate: string,

@@ -86,7 +86,6 @@ describe("getDashboardData", () => {
       reviewThreshold: 0.42
     });
     expect(snapshot.loadError).toContain("credentials are not configured");
-    expect(snapshot.budgets.status).toBe("unavailable");
     expect(snapshot.incomeRecords.status).toBe("unavailable");
     expect(snapshot.savingsTarget.status).toBe("unavailable");
     expect(snapshot.trend.status).toBe("unavailable");

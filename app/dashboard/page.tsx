@@ -45,7 +45,6 @@ export default async function DashboardPage() {
 
         <DashboardClient
           accuracy={dashboardData.accuracy}
-          budgets={dashboardData.budgets}
           canDelete={!dashboardData.isDemoData}
           expenses={dashboardData.expenses}
           financeTimezone={dashboardData.financeTimezone}

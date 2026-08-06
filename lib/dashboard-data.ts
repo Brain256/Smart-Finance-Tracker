@@ -7,7 +7,6 @@ import { sampleExpenses } from "@/lib/sample-data";
 import { createSupabaseExpenseClient, hasSupabaseDashboardConfig } from "@/lib/supabase-server";
 import {
   expenseCategories,
-  type CategoryBudget,
   type ClassificationAccuracy,
   type DashboardSnapshot,
   type ExpenseCategory,
@@ -17,15 +16,8 @@ import {
   type IncomeFrequency,
   type IncomeRecord,
   type SavingsTarget,
-  type SpendingCategory,
   type TrendPoint
 } from "@/lib/types";
-
-type BudgetTableRow = {
-  category: string;
-  monthly_limit: number | string;
-  updated_at: string;
-};
 
 type IncomeTableRow = {
   id: number;
@@ -62,10 +54,6 @@ export type DashboardDateWindow = {
 
 function isExpenseCategory(value: string): value is ExpenseCategory {
   return expenseCategories.includes(value as ExpenseCategory);
-}
-
-function isSpendingCategory(value: string): value is SpendingCategory {
-  return value !== "Income" && isExpenseCategory(value);
 }
 
 function isIncomeFrequency(value: string): value is IncomeFrequency {
@@ -123,19 +111,6 @@ export function normalizeExpenseRow(row: ExpenseTableRow): ExpenseRecord {
       ? row.classification_origin
       : null
   };
-}
-
-function normalizeBudgetRow(row: BudgetTableRow): CategoryBudget {
-  if (!isSpendingCategory(row.category)) {
-    throw new Error("Category budget has an unsupported category.");
-  }
-
-  const monthlyLimit = parseFiniteNumber(row.monthly_limit, "Category budget monthly limit");
-  if (monthlyLimit < 0) {
-    throw new Error("Category budget monthly limit cannot be negative.");
-  }
-
-  return { category: row.category, monthlyLimit, updatedAt: row.updated_at };
 }
 
 function normalizeIncomeRow(row: IncomeTableRow): IncomeRecord {
@@ -303,7 +278,6 @@ function coreFallback(
 
   return {
     expenses: sampleExpenses,
-    budgets: { status: "unavailable", reason },
     incomeRecords: { status: "unavailable", reason },
     savingsTarget: { status: "unavailable", reason },
     trend: { status: "unavailable", reason },
@@ -365,15 +339,7 @@ export async function getDashboardData(): Promise<DashboardSnapshot> {
   }
 
   const window = getDashboardDateWindow(new Date(), financeTimezone);
-  const [budgets, incomeRecords, savingsTarget, trend, accuracy] = await Promise.all([
-    loadOptional("Category budgets", async () => {
-      const { data, error } = await client
-        .from("category_budgets")
-        .select("category, monthly_limit, updated_at")
-        .order("category", { ascending: true });
-      if (error) throw new Error("Category budget query failed.");
-      return ((data ?? []) as BudgetTableRow[]).map(normalizeBudgetRow);
-    }),
+  const [incomeRecords, savingsTarget, trend, accuracy] = await Promise.all([
     loadOptional("Income records", async () => {
       const { data, error } = await client
         .from("income_records")
@@ -413,7 +379,6 @@ export async function getDashboardData(): Promise<DashboardSnapshot> {
 
   return {
     expenses,
-    budgets,
     incomeRecords,
     savingsTarget,
     trend,

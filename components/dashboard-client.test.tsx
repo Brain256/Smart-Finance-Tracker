@@ -158,7 +158,7 @@ describe("DashboardClient composition", () => {
     expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Income history" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Savings target" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Category budgets" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Category budgets" })).not.toBeInTheDocument();
   });
 
   it("focuses the matching editor and replaces a successfully corrected low-confidence row", async () => {
@@ -224,7 +224,7 @@ describe("DashboardClient composition", () => {
 });
 
 describe("Overview accuracy and planning presentation", () => {
-  it("renders 90-day accuracy with its classified and corrected counts", () => {
+  it("renders 90-day accuracy with its classified and corrected counts", async () => {
     renderDashboard([], {
       accuracy: ready({
         accuracy: 0.9,
@@ -234,12 +234,25 @@ describe("Overview accuracy and planning presentation", () => {
         windowEnd: "2025-01-15"
       })
     });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("tab", { name: "Transactions" }));
 
     expect(screen.getByText("90.0%")).toBeInTheDocument();
     expect(screen.getByText(/2 corrected of 20 classified since 2024-10-18/)).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Spending by category" })).not.toBeInTheDocument();
   });
 
-  it("reports insufficient data instead of an accuracy value when nothing was classified", () => {
+  it("shows category spending percentages in the chart legend", () => {
+    renderDashboard([
+      expense({ id: 1, category: "Food", amount: 25 }),
+      expense({ id: 2, category: "Transport", amount: 75 })
+    ]);
+
+    expect(screen.getByText("25%")).toBeInTheDocument();
+    expect(screen.getByText("75%")).toBeInTheDocument();
+  });
+
+  it("reports insufficient data instead of an accuracy value when nothing was classified", async () => {
     renderDashboard([], {
       accuracy: ready({
         accuracy: null,
@@ -249,6 +262,8 @@ describe("Overview accuracy and planning presentation", () => {
         windowEnd: "2025-01-15"
       })
     });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("tab", { name: "Transactions" }));
 
     expect(screen.getByText(/Not enough classified transactions yet/)).toBeInTheDocument();
   });
@@ -256,11 +271,10 @@ describe("Overview accuracy and planning presentation", () => {
   it("names each missing prerequisite instead of showing a zero-valued limit or projection", () => {
     renderDashboard([], { budgets: ready([]), incomeRecords: ready([]), savingsTarget: ready(null) });
 
-    expect(screen.getByText("Add an active income record, a savings target in Settings to derive spending limits.")).toBeInTheDocument();
-    expect(screen.getByText("Add an active income record, a savings target to see a projection.")).toBeInTheDocument();
+    expect(screen.getByText("Add an active income record, a savings target in Settings to compare spending against a budget.")).toBeInTheDocument();
   });
 
-  it("renders derived limits and one projection value when planning data is complete", () => {
+  it("renders derived budgets and period pacing when planning data is complete", () => {
     renderDashboard([expense({ id: 1, amount: 100, category: "Food" })], {
       budgets: ready([{ category: "Food", monthlyLimit: 500, updatedAt: "2025-01-01T00:00:00.000Z" }]),
       incomeRecords: ready([
@@ -270,37 +284,52 @@ describe("Overview accuracy and planning presentation", () => {
     });
 
     // Spendable = 4000 - 1000 = 3000 over a 31-day month.
-    expect(screen.getByText("$3,000.00")).toBeInTheDocument();
-    expect(screen.getByText("$96.77")).toBeInTheDocument();
-    expect(screen.getByText(/17 days remaining/)).toBeInTheDocument();
+    const panel = screen.getByRole("heading", { name: "Spending against budget" }).closest("section") as HTMLElement;
+    const monthRow = within(panel).getByText("Spending this month").closest("li") as HTMLElement;
+    expect(within(panel).getByText("$3,000.00")).toBeInTheDocument();
+    expect(within(panel).getByText("$96.77")).toBeInTheDocument();
+    expect(within(monthRow).getByText(/Projected:/)).toBeInTheDocument();
+    expect(within(monthRow).getByText(/16 days remaining/)).toBeInTheDocument();
   });
 
-  it("keeps net this month independent of every planning input", () => {
+  it("combines period spending, budget usage bars, and the savings target", () => {
+    renderDashboard(
+      [
+        expense({ id: 1, amount: 75, timestamp: "2025-01-15T17:00:00.000Z" }),
+        expense({ id: 2, amount: 600, timestamp: "2025-01-13T17:00:00.000Z" })
+      ],
+      {
+        budgets: ready([]),
+        incomeRecords: ready([
+          { id: 1, amount: 4000, frequency: "monthly", effectiveDate: "2025-01-01", createdAt: "", updatedAt: "" }
+        ]),
+        savingsTarget: ready({ id: 1, mode: "fixed", value: 1000, updatedAt: "" })
+      }
+    );
+
+    const panel = screen.getByRole("heading", { name: "Spending against budget" }).closest("section") as HTMLElement;
+    expect(within(panel).getByText("$75.00")).toBeInTheDocument();
+    const monthRow = within(panel).getByText("Spending this month").closest("li") as HTMLElement;
+    expect(within(monthRow).getByText("$675.00")).toBeInTheDocument();
+    expect(within(panel).getByText("$3,000.00")).toBeInTheDocument();
+    expect(within(panel).getByText("Your savings target is $1,000.00 per month.")).toBeInTheDocument();
+    expect(within(panel).getAllByRole("progressbar")).toHaveLength(6);
+  });
+
+  it("removes the standalone net panel while keeping Income out of spending totals", () => {
     const expenses = [
       expense({ id: 1, amount: 2000, category: "Income", merchantName: "Payroll" }),
       expense({ id: 2, amount: 250, category: "Food" })
     ];
 
-    const { rerender } = renderDashboard(expenses);
-    expect(screen.getByText("$1,750.00")).toBeInTheDocument();
+    renderDashboard(expenses);
 
-    rerender(
-      <DashboardClient
-        canDelete={false}
-        expenses={expenses}
-        financeTimezone={FINANCE_TIMEZONE}
-        reviewThreshold={0.7}
-        {...unavailableSnapshot}
-        budgets={ready([{ category: "Food", monthlyLimit: 10, updatedAt: "" }])}
-        incomeRecords={ready([{ id: 1, amount: 9999, frequency: "monthly", effectiveDate: "2025-01-01", createdAt: "", updatedAt: "" }])}
-        savingsTarget={ready({ id: 1, mode: "percentage", value: 50, updatedAt: "" })}
-      />
-    );
-    expect(screen.getByText("$1,750.00")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Net this month" })).not.toBeInTheDocument();
+    expect(screen.getByText("$250.00")).toBeInTheDocument();
+    expect(screen.queryByText("$1,750.00")).not.toBeInTheDocument();
   });
 
-  it("uses the adjusted remaining budget when unbudgeted spending is present", () => {
-    // Food limit $500, Food spend $100, unbudgeted Shopping $150 -> $250 adjusted remaining budget.
+  it("shows the month forecast from actual spending and the trailing daily average", () => {
     renderDashboard(
       [
         expense({ id: 1, amount: 100, category: "Food" }),
@@ -315,8 +344,9 @@ describe("Overview accuracy and planning presentation", () => {
       }
     );
 
-    // Baseline $250 less the 28-day average ($250/28 = $8.928…) over 17 remaining days.
-    expect(screen.getByText("$98.21")).toBeInTheDocument();
+    const panel = screen.getByRole("heading", { name: "Spending against budget" }).closest("section") as HTMLElement;
+    const monthRow = within(panel).getByText("Spending this month").closest("li") as HTMLElement;
+    expect(within(monthRow).getByText(/Projected: \$392.88/)).toBeInTheDocument();
   });
 
   it("renders the zero-filled 90-day trend as accessible date and amount detail", () => {
@@ -615,32 +645,6 @@ describe("Settings planning editors", () => {
     return user;
   }
 
-  it("adds a category budget and lists the persisted limit", async () => {
-    saveCategoryBudgetMock.mockResolvedValue({
-      ok: true,
-      data: { category: "Food", monthlyLimit: 500, updatedAt: "2025-01-15T00:00:00.000Z" }
-    });
-    const user = await openSettings();
-
-    await user.selectOptions(screen.getByLabelText("Category"), "Food");
-    await user.type(screen.getByLabelText("Monthly limit"), "500");
-    await user.click(screen.getByRole("button", { name: "Save budget" }));
-
-    await waitFor(() => expect(saveCategoryBudgetMock).toHaveBeenCalledWith("Food", "500"));
-    expect(await screen.findByText(/\$500\.00 per month/)).toBeInTheDocument();
-  });
-
-  it("keeps the entered value and shows a safe message when a budget save fails", async () => {
-    saveCategoryBudgetMock.mockResolvedValue({ ok: false, message: "Unable to save the category budget. Please try again." });
-    const user = await openSettings();
-
-    await user.type(screen.getByLabelText("Monthly limit"), "12.34");
-    await user.click(screen.getByRole("button", { name: "Save budget" }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("Unable to save the category budget. Please try again.");
-    expect(screen.getByLabelText("Monthly limit")).toHaveValue("12.34");
-  });
-
   it("adds an income record and keeps derived limits out of the editing surface", async () => {
     saveIncomeRecordMock.mockResolvedValue({
       ok: true,
@@ -713,7 +717,6 @@ describe("Settings planning editors", () => {
 
     expect(screen.getByText("Income records are unavailable.")).toBeInTheDocument();
     expect(screen.getByText("Savings target is unavailable.")).toBeInTheDocument();
-    expect(screen.getByText("Category budgets are unavailable.")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Monthly limit")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Category budgets" })).not.toBeInTheDocument();
   });
 });

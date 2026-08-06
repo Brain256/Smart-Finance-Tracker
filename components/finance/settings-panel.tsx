@@ -1,37 +1,28 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Banknote, PiggyBank, Target } from "lucide-react";
+import { Banknote, PiggyBank } from "lucide-react";
 
 import {
-  deleteCategoryBudget,
   deleteIncomeRecord,
   deleteSavingsTarget,
-  saveCategoryBudget,
   saveIncomeRecord,
   saveSavingsTarget
 } from "@/app/dashboard/actions";
 import { formatCurrency } from "@/lib/format";
 import {
-  expenseCategories,
-  type CategoryBudget,
   type FeatureLoadState,
   type IncomeFrequency,
   type IncomeRecord,
   type SavingsTarget,
-  type SavingsTargetMode,
-  type SpendingCategory
+  type SavingsTargetMode
 } from "@/lib/types";
 
 type SettingsPanelProps = {
-  budgets: FeatureLoadState<CategoryBudget[]>;
   incomeRecords: FeatureLoadState<IncomeRecord[]>;
   savingsTarget: FeatureLoadState<SavingsTarget | null>;
 };
 
-const spendingCategories = expenseCategories.filter(
-  (category): category is SpendingCategory => category !== "Income"
-);
 const incomeFrequencies: IncomeFrequency[] = ["weekly", "biweekly", "monthly"];
 
 const fieldClass =
@@ -356,159 +347,18 @@ function SavingsSection({ state }: { state: FeatureLoadState<SavingsTarget | nul
   );
 }
 
-function BudgetSection({ state }: { state: FeatureLoadState<CategoryBudget[]> }) {
-  const [budgets, setBudgets] = useState<CategoryBudget[]>(
-    state.status === "ready" ? state.data : []
-  );
-  const [category, setCategory] = useState<SpendingCategory>(spendingCategories[0]);
-  const [monthlyLimit, setMonthlyLimit] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
-
-  function submit(): void {
-    setError(null);
-    startTransition(async () => {
-      const result = await saveCategoryBudget(category, monthlyLimit);
-      if (!result.ok) {
-        setError(result.message);
-        return;
-      }
-
-      setBudgets((current) => {
-        const others = current.filter((budget) => budget.category !== result.data.category);
-        return [...others, result.data].sort((first, second) =>
-          first.category.localeCompare(second.category)
-        );
-      });
-      setMonthlyLimit("");
-    });
-  }
-
-  function remove(budget: CategoryBudget): void {
-    setError(null);
-    startTransition(async () => {
-      const result = await deleteCategoryBudget(budget.category);
-      if (!result.ok) {
-        setError(result.message);
-        return;
-      }
-
-      setBudgets((current) => current.filter((item) => item.category !== budget.category));
-    });
-  }
-
-  return (
-    <SectionShell
-      description="One monthly limit for each spending category. Income cannot hold a budget."
-      error={error}
-      icon={<Target aria-hidden="true" className="h-4 w-4" />}
-      title="Category budgets"
-    >
-      {state.status === "unavailable" ? (
-        <UnavailableNotice reason={state.reason} />
-      ) : (
-        <div className="flex flex-col gap-4">
-          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-700" htmlFor="budget-category">
-                Category
-              </label>
-              <select
-                className={fieldClass}
-                disabled={isPending}
-                id="budget-category"
-                onChange={(event) => setCategory(event.target.value as SpendingCategory)}
-                value={category}
-              >
-                {spendingCategories.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-700" htmlFor="budget-monthly-limit">
-                Monthly limit
-              </label>
-              <input
-                className={fieldClass}
-                disabled={isPending}
-                id="budget-monthly-limit"
-                inputMode="decimal"
-                onChange={(event) => setMonthlyLimit(event.target.value)}
-                placeholder="0.00"
-                value={monthlyLimit}
-              />
-            </div>
-            <button className={primaryButtonClass} disabled={isPending} onClick={submit} type="button">
-              Save budget
-            </button>
-          </div>
-
-          {budgets.length === 0 ? (
-            <p className="text-sm text-[var(--muted)]">No category budgets yet.</p>
-          ) : (
-            <ul className="divide-y divide-[var(--border)] rounded-md border border-[var(--border)]">
-              {budgets.map((budget) => (
-                <li
-                  className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm"
-                  key={budget.category}
-                >
-                  <span className="text-slate-700">
-                    <span className="font-semibold text-slate-950">{budget.category}</span>{" "}
-                    {formatCurrency(budget.monthlyLimit)} per month
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <button
-                      aria-label={`Edit ${budget.category} budget`}
-                      className={subtleButtonClass}
-                      disabled={isPending}
-                      onClick={() => {
-                        setCategory(budget.category);
-                        setMonthlyLimit(budget.monthlyLimit.toFixed(2));
-                        setError(null);
-                      }}
-                      type="button"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      aria-label={`Remove ${budget.category} budget`}
-                      className={destructiveButtonClass}
-                      disabled={isPending}
-                      onClick={() => remove(budget)}
-                      type="button"
-                    >
-                      Remove
-                    </button>
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-    </SectionShell>
-  );
-}
-
-/**
- * Editing surface for planned income, savings, and budgets. Derived limits are presented on
- * Overview only, so this panel never shows a calculated value as an editable field.
- */
-export function SettingsPanel({ budgets, incomeRecords, savingsTarget }: SettingsPanelProps) {
+/** Editing surface for planned income and savings. Derived limits are presented on Overview. */
+export function SettingsPanel({ incomeRecords, savingsTarget }: SettingsPanelProps) {
   return (
     <section className="grid gap-5">
       <div className="rounded-lg border border-[var(--border)] bg-white p-4 shadow-sm">
         <h2 className="text-base font-semibold tracking-normal text-slate-950">Settings</h2>
         <p className="mt-1 text-sm text-[var(--muted)]">
-          Planned income, savings, and category budgets feed the derived limits and projection on Overview.
+          Planned income and savings targets feed the derived spending limits on Overview.
         </p>
       </div>
       <IncomeSection state={incomeRecords} />
       <SavingsSection state={savingsTarget} />
-      <BudgetSection state={budgets} />
     </section>
   );
 }

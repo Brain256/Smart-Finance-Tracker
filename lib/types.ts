@@ -146,7 +146,6 @@ export type DashboardData = {
 };
 
 export type DashboardSnapshot = DashboardData & {
-  budgets: FeatureLoadState<CategoryBudget[]>;
   incomeRecords: FeatureLoadState<IncomeRecord[]>;
   savingsTarget: FeatureLoadState<SavingsTarget | null>;
   trend: FeatureLoadState<TrendPoint[]>;

@@ -8,6 +8,8 @@ import {
   getFinanceDateKey,
   getMonthlySavingsAmount,
   getNetCashFlow,
+  getPeriodBudgetUsage,
+  getPeriodPacing,
   getPlanningLimits,
   getProjection,
   getTrailingAverageSpending,
@@ -111,6 +113,79 @@ describe("finance analytics", () => {
       status: "incomplete",
       missing: ["active-income", "savings-target"]
     });
+  });
+
+  it("combines period spending with daily, weekly, and monthly budgets", () => {
+    const limits = getPlanningLimits(
+      [income(1, 4000, "monthly", "2025-01-01")],
+      { id: 1, mode: "fixed", value: 1000, updatedAt: "2025-01-01T00:00:00Z" },
+      "2025-01-15"
+    );
+    const usage = getPeriodBudgetUsage(
+      { today: 75, week: 600, month: 3000 },
+      limits
+    );
+
+    expect(usage[0]).toMatchObject({ period: "today", spending: 75, state: "yellow" });
+    expect(usage[0].budget).toBeCloseTo(3000 / 31, 2);
+    expect(usage[1]).toMatchObject({ period: "week", spending: 600, state: "yellow" });
+    expect(usage[1].budget).toBeCloseTo((3000 / 31) * 7, 2);
+    expect(usage[2]).toMatchObject({ period: "month", spending: 3000, budget: 3000, consumption: 1, state: "red" });
+  });
+
+  it("adds elapsed time, weekly average, and end-of-period pacing forecasts", () => {
+    const calculationDate = "2025-01-15";
+    const expenses = [
+      expense(1, 50, "Food", "2025-01-13T17:00:00.000Z"),
+      expense(2, 100, "Food", "2025-01-15T17:00:00.000Z")
+    ];
+    const metrics = {
+      today: 100,
+      week: 150,
+      month: 150
+    };
+    const limits = getPlanningLimits(
+      [income(1, 4000, "monthly", "2025-01-01")],
+      { id: 1, mode: "fixed", value: 1000, updatedAt: "2025-01-01T00:00:00Z" },
+      calculationDate
+    );
+    const pacing = getPeriodPacing(expenses, metrics, limits, calculationDate, TIME_ZONE);
+
+    expect(pacing[0]).toMatchObject({
+      period: "today",
+      averageDailySpending: 50,
+      elapsedDays: 3,
+      remainingDays: 4
+    });
+    expect(pacing[1]).toMatchObject({
+      period: "week",
+      elapsedDays: 3,
+      totalDays: 7,
+      remainingDays: 4,
+      projectedSpending: 171.44,
+      pacingState: "under"
+    });
+    expect(pacing[2]).toMatchObject({
+      period: "month",
+      elapsedDays: 15,
+      totalDays: 31,
+      remainingDays: 16,
+      projectedSpending: 235.76,
+      pacingState: "under"
+    });
+  });
+
+  it("leaves period budgets unavailable when planning prerequisites are incomplete", () => {
+    const usage = getPeriodBudgetUsage(
+      { today: 12.34, week: 56.78, month: 90.12 },
+      getPlanningLimits([], null, "2025-01-15")
+    );
+
+    expect(usage).toEqual([
+      { period: "today", spending: 12.34, budget: null, consumption: null, state: null },
+      { period: "week", spending: 56.78, budget: null, consumption: null, state: null },
+      { period: "month", spending: 90.12, budget: null, consumption: null, state: null }
+    ]);
   });
 
   it("tracks configured category consumption while excluding Income from spending", () => {
