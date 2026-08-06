@@ -53,8 +53,15 @@ function getCellLabel(dateKey: string, total: number, level: number): string {
   return `${formatCellDate(dateKey)}: ${amount}, ${INTENSITY_LEVELS[level].descriptor}`;
 }
 
-function CalendarLegend() {
-  return <div className="mt-2 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-[10px] text-[var(--muted)] sm:justify-end"><span className="font-medium">Less</span><ul className="flex flex-wrap items-center gap-x-2 gap-y-1">{INTENSITY_LEVELS.map((level) => <li className="flex items-center gap-1" key={level.descriptor}><span aria-hidden="true" className={`h-3 w-3 shrink-0 rounded-sm border border-slate-200 ${level.className}`} /><span className="whitespace-nowrap">{level.descriptor}</span></li>)}</ul><span className="font-medium">More</span></div>;
+function CalendarLegend({ compact = false }: { compact?: boolean } = {}) {
+  return <div className="mt-2 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-[10px] text-[var(--muted)] sm:justify-end"><span className="font-medium">Less</span><ul className="flex flex-wrap items-center gap-x-1.5 gap-y-1">{INTENSITY_LEVELS.map((level) => <li className="flex items-center gap-1" key={level.descriptor}><span aria-hidden="true" className={`h-3 w-3 shrink-0 rounded-sm border border-slate-200 ${level.className}`} />{compact ? <span className="sr-only">{level.descriptor}</span> : <span className="whitespace-nowrap">{level.descriptor}</span>}</li>)}</ul><span className="font-medium">More</span></div>;
+}
+
+export function CalendarHeatmapPreview({ expenses, monthKey, financeTimezone, onOpenCalendar }: { expenses: ExpenseRecord[]; monthKey: string; financeTimezone: string; onOpenCalendar: () => void }) {
+  const grid = buildHeatmapDays(expenses, monthKey, financeTimezone);
+  const weekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+  return <section className="rounded-lg border border-[var(--border)] bg-white p-3 shadow-sm"><div className="mb-3 flex items-start justify-between gap-2"><div><h2 className="text-sm font-semibold tracking-normal text-slate-950">Calendar</h2><p className="text-xs text-[var(--muted)]">This month</p></div><button className="focus-ring shrink-0 rounded-md border border-[var(--border)] px-2 py-1 text-[11px] font-semibold text-slate-700 transition hover:bg-slate-50" onClick={onOpenCalendar} type="button">View calendar</button></div><div className="mx-auto w-full"><div className="grid grid-cols-7 gap-0.5 text-center text-[9px] font-medium text-[var(--muted)]">{weekdayLabels.map((day) => <div className="py-0.5" key={day}>{day}</div>)}</div><div aria-label={`${getMonthKeyLabel(monthKey)} spending calendar`} className="grid grid-cols-7 gap-0.5" role="grid">{Array.from({ length: grid.leadingPadding }, (_, index) => <div aria-hidden="true" className="aspect-square" key={`preview-leading-${index}`} />)}{grid.days.map((day) => <div aria-label={getCellLabel(day.dateKey, day.total, day.level)} className={`aspect-square rounded-sm border border-slate-200 ${INTENSITY_LEVELS[day.level].className}`} key={day.dateKey} role="gridcell" />)}{Array.from({ length: grid.trailingPadding }, (_, index) => <div aria-hidden="true" className="aspect-square" key={`preview-trailing-${index}`} />)}</div><CalendarLegend compact /></div></section>;
 }
 
 export function CalendarHeatmap({ expenses, monthKey, activeCellKey, selectedDateKey, onChangeMonth, onActiveCellKeyChange, onSelectDate, financeTimezone }: CalendarHeatmapProps) {

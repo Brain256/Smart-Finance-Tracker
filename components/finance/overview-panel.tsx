@@ -16,12 +16,14 @@ import {
 
 import {
   getFinanceDateKey,
+  getFinanceMonthKey,
   getPeriodPacing,
   getPeriodMetrics,
   getPlanningLimits,
   isSpendingExpense,
   type PlanningPrerequisite
 } from "@/lib/finance-analytics";
+import { CalendarHeatmapPreview } from "@/components/finance/calendar-heatmap";
 import { SpendingBudgetPanel } from "@/components/finance/spending-budget-panel";
 import { formatCompactCurrency, formatCurrency, formatDate } from "@/lib/format";
 import type {
@@ -39,6 +41,7 @@ type OverviewPanelProps = {
   incomeRecords: FeatureLoadState<IncomeRecord[]>;
   savingsTarget: FeatureLoadState<SavingsTarget | null>;
   trend: FeatureLoadState<TrendPoint[]>;
+  onOpenCalendar: () => void;
 };
 
 const chartColors = ["#0f766e", "#2563eb", "#d97706", "#dc2626", "#7c3aed", "#0891b2", "#4b5563"];
@@ -118,8 +121,9 @@ function SpendingTrendChart({ trend }: { trend: FeatureLoadState<TrendPoint[]> }
   );
 }
 
-export function OverviewPanel({ expenses, financeTimezone, incomeRecords, savingsTarget, trend }: OverviewPanelProps) {
+export function OverviewPanel({ expenses, financeTimezone, incomeRecords, savingsTarget, trend, onOpenCalendar }: OverviewPanelProps) {
   const calculationDate = getFinanceDateKey(new Date(), financeTimezone);
+  const currentMonthKey = getFinanceMonthKey(new Date(), financeTimezone);
   const spendingExpenses = expenses.filter(isSpendingExpense);
   const metrics = getPeriodMetrics(expenses, calculationDate, financeTimezone);
   const limits = getPlanningLimits(readyOrNull(incomeRecords), readyOrNull(savingsTarget), calculationDate);
@@ -144,7 +148,12 @@ export function OverviewPanel({ expenses, financeTimezone, incomeRecords, saving
         usage={periodBudgetUsage}
       />
 
-      <SpendingTrendChart trend={trend} />
+      <div className="grid gap-5 sm:grid-cols-[minmax(0,2fr)_minmax(220px,1fr)]">
+        <SpendingTrendChart trend={trend} />
+        <div className="hidden sm:block">
+          <CalendarHeatmapPreview expenses={expenses} financeTimezone={financeTimezone} monthKey={currentMonthKey} onOpenCalendar={onOpenCalendar} />
+        </div>
+      </div>
 
       <div className="grid gap-5 xl:grid-cols-2">
         <SpendingPieChart data={locationChartData} icon={<MapPin aria-hidden="true" className="h-4 w-4" />} subtitle="Grouped by merchant until a dedicated location field exists" title="Spending by location" />

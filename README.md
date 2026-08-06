@@ -1,8 +1,7 @@
 # Smart Finance Tracker
 
 **Turns a Google Wallet tap-to-pay notification into a categorized, queryable
-expense row in Postgres — in about a second, with no bank API, no screen
-scraping, and no third-party aggregator.**
+expense row in Postgres.**
 
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
@@ -11,71 +10,48 @@ scraping, and no third-party aggregator.**
 ![Kotlin](https://img.shields.io/badge/Kotlin-Android-7F52FF?logo=kotlin&logoColor=white)
 ![Supabase](https://img.shields.io/badge/Supabase-Postgres-3FCF8E?logo=supabase&logoColor=white)
 
-**Live demo:** _(deployment URL — TODO)_
+## Overview
 
-## Screenshots
+Smart Finance Tracker uses Google Wallet notifications as a real-time transaction
+source, so expenses can be captured across multiple cards without connecting to
+individual bank APIs. The Android client forwards notifications to a FastAPI
+service, which classifies them and stores structured transactions in Postgres.
 
-<!--
-  Drop three PNGs into docs/images/ with exactly these filenames:
-    dashboard-overview.png      — Overview tab: spending cards, trend, budgets
-    dashboard-transactions.png  — Transactions tab: sortable table, category edit
-    dashboard-settings.png      — Settings tab: income, savings target, budgets
--->
+## Screenshot
 
-| Overview | Transactions |
-| --- | --- |
-| ![Overview tab](docs/images/dashboard-overview.png) | ![Transactions tab](docs/images/dashboard-transactions.png) |
-
-![Settings tab](docs/images/dashboard-settings.png)
-
-## Why it exists
-
-Consumer bank APIs are effectively closed. Aggregators like Plaid are gated
-behind commercial agreements and priced for businesses, not for one person
-tracking their own spending — and handing a third party your banking credentials
-to read data your phone already has is a poor trade.
-
-Google Wallet already pushes a notification for every card transaction it
-handles, naming the merchant and the amount. That is the same event stream,
-delivered for free, in real time, and it works across every card added to the
-wallet rather than one bank at a time. This project treats the Android
-notification shade as the data source: a listener service
-captures the push, a FastAPI gateway validates it, an LLM extracts structured
-fields from the unstructured text, and Postgres stores it idempotently.
+<p align="center">
+  <img src="docs/images/overview.jpg" alt="Dashboard overview" width="60%" />
+</p>
 
 ## Architecture
 
-```text
-  Card purchase
-       │
-       ▼
-┌──────────────────────┐
-│  Android client      │  NotificationListenerService reads Google Wallet's
-│  (Kotlin)            │  title + body + postTime; offline? → Room queue →
-│                      │  WorkManager drains on reconnect
-└──────────┬───────────┘
-           │  POST /api/v1/ingest   (Bearer token)
-           ▼
-┌──────────────────────┐
-│  FastAPI gateway     │  Bearer auth → Pydantic v2 validation → timestamp normalization
-│  (Vercel serverless) │
-└──────────┬───────────┘
-           │
-           ▼
-┌──────────────────────┐
-│  Groq + instructor   │  Unstructured text → { merchant_name, amount, category, confidence }
-│  (Llama 3.3 70B)     │  Prior user correction for this merchant overrides the LLM
-└──────────┬───────────┘
-           │
-           ▼
-┌──────────────────────┐
-│  Supabase Postgres   │  UPSERT on (merchant_name, amount, timestamp) → replay-safe
-└──────────┬───────────┘
-           │
-           ▼
-┌──────────────────────┐
-│  Next.js dashboard   │  Google OAuth + email allowlist; trends, budgets, projections
-└──────────────────────┘
+```mermaid
+flowchart TB
+  subgraph sources["Sources"]
+    wallet["Google Wallet<br/>notification"]
+    user["User browser"]
+  end
+
+  subgraph clients["Clients"]
+    android["Android client<br/>Notification listener<br/>Offline queue"]
+    dashboard["Next.js dashboard<br/>Google OAuth<br/>Budgets + projections"]
+  end
+
+  subgraph backend["FastAPI ingestion service"]
+    api["FastAPI<br/>Auth + validation"]
+    classifier["Groq + instructor<br/>Transaction extraction<br/>Corrections"]
+  end
+
+  subgraph data["Data layer"]
+    postgres["Supabase Postgres<br/>Idempotent writes<br/>Analytics"]
+  end
+
+  wallet -->|"notification"| android
+  android -->|"ingest"| api
+  api -->|"transaction"| classifier
+  classifier -->|"classified data"| postgres
+  user -->|"sign in"| dashboard
+  dashboard -->|"queries"| postgres
 ```
 
 | Layer | Technology | Responsibility |
@@ -85,53 +61,6 @@ fields from the unstructured text, and Postgres stores it idempotently.
 | Classification | `instructor` + Groq | Extract typed fields from free text; apply learned corrections |
 | Storage | Supabase Postgres | Idempotent writes, correction audit log, analytics RPCs |
 | Dashboard | Next.js App Router, Auth.js, Recharts | Private analytics, review queue, budget planning |
-
-## Engineering highlights
-
-**Idempotent ingestion.** Cellular delivery duplicates requests, and the Android
-client retries from its own queue, so the same transaction can arrive several
-times. A composite unique constraint on `(merchant_name, amount, timestamp)`
-turns that into a non-event: ingestion upserts against the constraint, traps the
-collision, and returns `200 OK` for a replay versus `202 Accepted` for a genuinely
-new transaction. Historical rows and charts never shift under a retry.
-→ `src/core/database.py`
-
-**Corrections are the cache.** There is no merchant cache table to keep in sync.
-When you fix a miscategorized merchant, that write lands in an immutable
-`corrections` audit log — and the same log is the lookup source for every future
-expense. `resolve_latest_correction` matches on a normalized merchant key (a
-stored generated column, so legacy rows participate) and overrides the LLM before
-insert. One table serves as both the audit trail and the learned-category store,
-and a correction hit deliberately *retains* the original LLM confidence so the
-accuracy metric keeps measuring the model rather than flattering it.
-→ `supabase/migrations/002_corrections_and_rpcs.sql`
-
-**Integer-cents arithmetic.** Floating-point dollars drift, and drift in a
-financial total is a bug you find months later. Amounts convert to integer cents
-at the data boundary; every comparison, sum, and budget threshold runs in cents;
-conversion back to dollars happens only at render.
-→ `lib/finance-analytics.ts`
-
-**Timezone-correct financial dates.** "Today's spending" is ambiguous across a
-serverless worker in one region, a Postgres instance in another, and a browser in
-a third. A single `FINANCE_TIMEZONE` drives every day/week/month boundary in all
-three: `zoneinfo` validates it in Python, `Intl.DateTimeFormat` in TypeScript, and
-SQL RPCs receive it as a parameter. A malformed value fails loudly instead of
-silently shifting a month boundary.
-→ `lib/finance-config.ts`, `src/core/finance_config.py`
-
-**Graceful capability degradation.** Each optional dashboard read resolves to
-`{ status: 'ready', data } | { status: 'unavailable', reason }`. A missing
-migration disables exactly the panel that depends on it, with a named reason,
-while real expense data stays visible — instead of a blank page or, worse, a
-confident `$0`.
-→ `lib/dashboard-data.ts`
-
-**Offline-durable capture.** A tap-to-pay notification arrives once; if the POST fails there
-is no second chance from the OS. Failed requests persist to a Room table and
-drain through a `WorkManager` job constrained to `NetworkType.CONNECTED`, so a
-purchase made in airplane mode still lands in Postgres on reconnect.
-→ `AndroidClient/app/src/main/java/com/finance/androidclient/worker/NotificationSyncWorker.kt`
 
 ## Testing
 
