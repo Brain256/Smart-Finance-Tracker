@@ -12,7 +12,7 @@ from openai.types.chat import ChatCompletionMessageParam
 from src.schemas.transaction import LlmClassification
 
 GROQ_BASE_URL: Final[str] = "https://api.groq.com/openai/v1"
-DEFAULT_GROQ_MODEL: Final[str] = "llama-3.3-70b-versatile"
+DEFAULT_GROQ_MODEL: Final[str] = "openai/gpt-oss-20b"
 
 SYSTEM_PROMPT: Final[str] = """
 You are a strict banking notification compiler for a personal finance tracker.
