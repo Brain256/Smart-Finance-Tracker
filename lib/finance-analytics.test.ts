@@ -5,11 +5,15 @@ import {
   buildDaySummary,
   centsToAmount,
   getBudgetProgress,
+  getCalendarDayProgress,
   getFinanceDateKey,
   getMonthlySavingsAmount,
   getNetCashFlow,
+  getPeriodMetrics,
   getPeriodBudgetUsage,
   getPeriodPacing,
+  getRecentSpendingExpenses,
+  getRemainingPeriodBudget,
   getPlanningLimits,
   getProjection,
   getTrailingAverageSpending,
@@ -73,6 +77,70 @@ describe("finance analytics", () => {
     expect(centsToAmount(1234)).toBe(12.34);
   });
 
+  it("calculates display progress and remaining budgets with calendar-safe cents", () => {
+    expect(getCalendarDayProgress("2024-02-29")).toEqual({
+      dateKey: "2024-02-29",
+      dayOfMonth: 29,
+      daysInMonth: 29
+    });
+    expect(getRemainingPeriodBudget({ budget: 250, spending: 125.25 })).toBe(124.75);
+    expect(getRemainingPeriodBudget({ budget: 100, spending: 125.01 })).toBe(-25.01);
+    expect(getRemainingPeriodBudget({ budget: null, spending: 125.01 })).toBeNull();
+  });
+
+  it("calculates all-time spending across history without including Income", () => {
+    const metrics = getPeriodMetrics(
+      [
+        expense(1, 20, "Food", "2025-01-15T17:00:00.000Z"),
+        expense(2, 30, "Income", "2025-01-15T18:00:00.000Z"),
+        expense(3, 40, "Shopping", "2024-12-31T17:00:00.000Z"),
+        expense(4, 50, "Food", "2025-01-13T17:00:00.000Z")
+      ],
+      "2025-01-15",
+      TIME_ZONE
+    );
+
+    expect(metrics).toEqual({ today: 20, week: 70, month: 70, allTime: 110 });
+  });
+
+  it("selects the newest spending records, excludes Income, and preserves the input", () => {
+    const source = [
+      expense(1, 10, "Food", "2025-01-01T17:00:00.000Z"),
+      expense(2, 20, "Income", "2025-01-20T17:00:00.000Z"),
+      expense(3, 30, "Transport", "2025-01-10T17:00:00.000Z"),
+      expense(4, 40, "Shopping", "2025-01-11T17:00:00.000Z"),
+      expense(5, 50, "Bills", "2025-01-12T17:00:00.000Z"),
+      expense(6, 60, "Food", "2025-01-13T17:00:00.000Z"),
+      expense(7, 70, "Miscellaneous", "2025-01-14T17:00:00.000Z")
+    ];
+    const original = [...source];
+
+    expect(getRecentSpendingExpenses(source).map((record) => record.id)).toEqual([7, 6, 5, 4, 3]);
+    expect(getRecentSpendingExpenses(source, 3).map((record) => record.id)).toEqual([7, 6, 5]);
+    expect(source).toEqual(original);
+  });
+
+  it("returns all available spending records below the limit and handles empty input", () => {
+    const available = [
+      expense(1, 10, "Food", "2025-01-01T17:00:00.000Z"),
+      expense(2, 20, "Income", "2025-01-02T17:00:00.000Z"),
+      expense(3, 30, "Transport", "2025-01-03T17:00:00.000Z")
+    ];
+
+    expect(getRecentSpendingExpenses(available).map((record) => record.id)).toEqual([3, 1]);
+    expect(getRecentSpendingExpenses([])).toEqual([]);
+  });
+
+  it("uses the expense id to order equal timestamps deterministically", () => {
+    const tied = [
+      expense(9, 10, "Food", "2025-01-10T17:00:00.000Z"),
+      expense(11, 20, "Transport", "2025-01-09T17:00:00.000Z"),
+      expense(10, 30, "Shopping", "2025-01-10T17:00:00.000Z")
+    ];
+
+    expect(getRecentSpendingExpenses(tied).map((record) => record.id)).toEqual([10, 9, 11]);
+  });
+
   it("selects the latest effective income and normalizes its frequency", () => {
     const records = [
       income(1, 1000, "monthly", "2026-01-01"),
@@ -122,7 +190,7 @@ describe("finance analytics", () => {
       "2025-01-15"
     );
     const usage = getPeriodBudgetUsage(
-      { today: 75, week: 600, month: 3000 },
+      { today: 75, week: 600, month: 3000, allTime: 3000 },
       limits
     );
 
@@ -142,7 +210,8 @@ describe("finance analytics", () => {
     const metrics = {
       today: 100,
       week: 150,
-      month: 150
+      month: 150,
+      allTime: 150
     };
     const limits = getPlanningLimits(
       [income(1, 4000, "monthly", "2025-01-01")],
@@ -177,7 +246,7 @@ describe("finance analytics", () => {
 
   it("leaves period budgets unavailable when planning prerequisites are incomplete", () => {
     const usage = getPeriodBudgetUsage(
-      { today: 12.34, week: 56.78, month: 90.12 },
+      { today: 12.34, week: 56.78, month: 90.12, allTime: 90.12 },
       getPlanningLimits([], null, "2025-01-15")
     );
 

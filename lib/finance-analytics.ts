@@ -52,6 +52,12 @@ export type PeriodBudgetUsage = {
   pacingState?: PacingState | null;
 };
 
+export type CalendarDayProgress = {
+  dateKey: string;
+  dayOfMonth: number;
+  daysInMonth: number;
+};
+
 export type ExpenseFilters = {
   merchantQuery: string;
   category: ExpenseCategory | "all";
@@ -263,6 +269,33 @@ export function isSpendingExpense<T extends Pick<ExpenseRecord, "category">>(
   return expense.category !== "Income";
 }
 
+/**
+ * Selects the newest spending records without mutating the loaded expense array.
+ * Equal timestamps use the record id as a deterministic newest-first tie-breaker.
+ */
+export function getRecentSpendingExpenses(
+  expenses: readonly ExpenseRecord[],
+  limit = 5
+): ExpenseRecord[] {
+  if (!Number.isInteger(limit) || limit <= 0) return [];
+
+  return expenses
+    .filter(isSpendingExpense)
+    .sort((first, second) => {
+      const firstTime = Date.parse(first.timestamp);
+      const secondTime = Date.parse(second.timestamp);
+
+      if (firstTime !== secondTime) {
+        if (!Number.isFinite(firstTime)) return 1;
+        if (!Number.isFinite(secondTime)) return -1;
+        return secondTime - firstTime;
+      }
+
+      return second.id - first.id;
+    })
+    .slice(0, limit);
+}
+
 /** Selects the latest record that was effective on or before the calculation date. */
 export function selectActiveIncome(
   incomeRecords: readonly IncomeRecord[],
@@ -369,7 +402,7 @@ export function getWeekStartDateKey(dateKey: string): string {
   return addCalendarDays(dateKey, -(weekday === 0 ? 6 : weekday - 1));
 }
 
-/** Today, week-to-date, and month-to-date spending, all keyed to the finance timezone. */
+/** Today, week-to-date, month-to-date, and all recorded spending, keyed to the finance timezone. */
 export function getPeriodMetrics(
   expenses: readonly ExpenseRecord[],
   calculationDate: string,
@@ -385,7 +418,8 @@ export function getPeriodMetrics(
     ),
     month: centsToAmount(
       getSpendingCents(expenses, (_, key) => getMonthKeyFromDateKey(key) === monthKey, timeZone)
-    )
+    ),
+    allTime: centsToAmount(getSpendingCents(expenses, () => true, timeZone))
   };
 }
 
@@ -423,6 +457,23 @@ export function getPeriodBudgetUsage(
   });
 }
 
+/** Returns a period budget remainder in cents-safe currency units, including negative overspending. */
+export function getRemainingPeriodBudget(
+  usage: Pick<PeriodBudgetUsage, "budget" | "spending">
+): number | null {
+  if (usage.budget === null) return null;
+  return centsToAmount(amountToCents(usage.budget) - amountToCents(usage.spending));
+}
+
+/** Returns the finance-local day number and total number of days in a calendar month. */
+export function getCalendarDayProgress(calculationDate: string): CalendarDayProgress {
+  const { day } = parseDateKey(calculationDate);
+  return {
+    dateKey: calculationDate,
+    dayOfMonth: day,
+    daysInMonth: getDaysInMonth(calculationDate)
+  };
+}
 
 function getPacingState(consumption: number | null, elapsedRatio: number): PacingState | null {
   if (consumption === null) return null;

@@ -15,9 +15,15 @@ type SpendingBudgetPanelProps = {
 };
 
 const stateClasses: Record<"green" | "yellow" | "red", string> = {
-  green: "bg-emerald-500",
-  yellow: "bg-amber-500",
-  red: "bg-red-500"
+  green: "bg-[var(--primary)]",
+  yellow: "bg-[var(--warning)]",
+  red: "bg-[var(--danger)]"
+};
+
+const periodBorderClasses: Record<PeriodBudgetUsage["period"], string> = {
+  today: "border-[var(--primary)]",
+  week: "border-[var(--accent)]",
+  month: "border-[var(--warning)]"
 };
 
 const periodLabels: Record<PeriodBudgetUsage["period"], { label: string; detail: string }> = {
@@ -54,11 +60,11 @@ function pacingMessage(usage: PeriodBudgetUsage): string | null {
 function BudgetUsageBar({ usage, label }: { usage: PeriodBudgetUsage; label: string }): React.ReactElement {
   const percentage = usage.consumption === null ? null : usage.consumption * 100;
   const width = percentage === null ? (usage.budget === 0 && usage.spending > 0 ? 100 : 0) : Math.min(100, percentage);
-  const actualClass = usage.state ? stateClasses[usage.state] : "bg-slate-300";
+  const actualClass = usage.state ? stateClasses[usage.state] : "bg-[var(--muted)]";
   const projectedWidth = usage.projectedConsumption === null || usage.projectedConsumption === undefined
     ? null
     : Math.min(100, usage.projectedConsumption * 100);
-  const projectedClass = usage.projectedState ? stateClasses[usage.projectedState] : "bg-slate-500";
+  const projectedClass = usage.projectedState ? stateClasses[usage.projectedState] : "bg-[var(--muted-strong)]";
 
   return (
     <div
@@ -66,7 +72,7 @@ function BudgetUsageBar({ usage, label }: { usage: PeriodBudgetUsage; label: str
       aria-valuemax={100}
       aria-valuemin={0}
       aria-valuenow={percentage === null ? 0 : Math.min(100, Math.round(percentage))}
-      className="relative mt-3 h-2 w-full overflow-visible rounded-full bg-slate-100"
+      className="relative mt-3 h-2 w-full overflow-visible rounded-full bg-[var(--panel-soft)]"
       role="progressbar"
     >
       <div className={`h-full rounded-full ${actualClass}`} style={{ width: `${width}%` }} />
@@ -92,10 +98,10 @@ function TimeProgressBar({ usage, label }: { usage: PeriodBudgetUsage; label: st
         aria-valuemax={100}
         aria-valuemin={0}
         aria-valuenow={Math.round(elapsedPercentage)}
-        className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-100"
+        className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[var(--panel-soft)]"
         role="progressbar"
       >
-        <div className="h-full rounded-full bg-slate-400" style={{ width: `${elapsedPercentage}%` }} />
+        <div className="h-full rounded-full bg-[var(--muted)]" style={{ width: `${elapsedPercentage}%` }} />
       </div>
       <p className="mt-1 text-xs text-[var(--muted)]">
         {`${usage.elapsedDays} of ${usage.totalDays} days elapsed · ${usage.remainingDays ?? 0} day${usage.remainingDays === 1 ? "" : "s"} remaining`}
@@ -110,7 +116,7 @@ function PeriodBudgetRow({ usage }: { usage: PeriodBudgetUsage }): React.ReactEl
   const pace = pacingMessage(usage);
 
   return (
-    <li className="rounded-md border border-[var(--border)] p-3">
+    <li className={`rounded-3xl border-2 bg-[var(--panel)] p-4 shadow-sm ${periodBorderClasses[usage.period]}`}>
       <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
         <div>
           <p className="font-medium text-slate-900">{labels.label}</p>
@@ -126,7 +132,6 @@ function PeriodBudgetRow({ usage }: { usage: PeriodBudgetUsage }): React.ReactEl
           )}
         </p>
       </div>
-
       <BudgetUsageBar label={labels.label} usage={usage} />
       <p className="mt-2 text-xs text-[var(--muted)]">
         {usage.budget === null
@@ -137,19 +142,16 @@ function PeriodBudgetRow({ usage }: { usage: PeriodBudgetUsage }): React.ReactEl
               ? "No budget available"
               : "No spending yet"}
       </p>
-
       {usage.period === "today" && usage.averageDailySpending !== undefined ? (
         <p className="mt-2 text-xs text-[var(--muted)]">
           {`Average daily spend this week: ${formatCurrency(usage.averageDailySpending)}`}
         </p>
       ) : null}
-
       {usage.projectedSpending !== undefined ? (
         <p className="mt-2 text-xs text-[var(--muted)]">
           {`Projected: ${formatCurrency(usage.projectedSpending)}${usage.projectedConsumption !== null && usage.projectedConsumption !== undefined && usage.projectedConsumption >= 1 ? " — over budget" : ""}`}
         </p>
       ) : null}
-
       <TimeProgressBar label={labels.label} usage={usage} />
       {pace ? <p className="mt-2 text-xs font-medium text-slate-700">{pace}</p> : null}
     </li>
@@ -161,21 +163,19 @@ export function SpendingBudgetPanel({ limits, usage, savingsTarget, planningUnav
   const planningMessage = planningUnavailableReason ?? incompleteMessage;
 
   return (
-    <section className="rounded-lg border border-[var(--border)] bg-white p-4 shadow-sm">
+    <section className="dashboard-card p-5">
       <div className="mb-4 flex items-start justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold tracking-normal text-slate-950">Spending against budget</h2>
           <p className="text-sm text-[var(--muted)]">Compare actual spending, projected spending, and time elapsed</p>
         </div>
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-700">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center dashboard-icon-tile">
           <Wallet aria-hidden="true" className="h-4 w-4" />
         </div>
       </div>
-
-      <ul className="grid gap-3 md:grid-cols-3" aria-label="Spending budget usage">
+      <ul aria-label="Spending budget usage" className="grid gap-3 md:grid-cols-3">
         {usage.map((item) => <PeriodBudgetRow key={item.period} usage={item} />)}
       </ul>
-
       {planningMessage ? <p className="mt-4 border-t border-[var(--border)] pt-4 text-sm text-[var(--muted)]">{planningMessage}</p> : null}
       {targetMessage ? <p className="mt-4 border-t border-[var(--border)] pt-4 text-sm text-[var(--muted)]">{targetMessage}</p> : null}
     </section>

@@ -51,7 +51,7 @@ export function DaySummaryPanel({ summary, financeTimezone, panelId, onClose }: 
   return (
     <section
       aria-label={`Transactions for ${formatDayHeading(summary.dateKey)}`}
-      className="mt-4 rounded-lg border border-[var(--border)] bg-white p-4 shadow-sm"
+      className="mt-4 dashboard-card p-4"
       id={panelId}
     >
       <div className="flex items-start justify-between gap-3">
@@ -66,7 +66,7 @@ export function DaySummaryPanel({ summary, financeTimezone, panelId, onClose }: 
         </div>
         <button
           aria-label="Close day details"
-          className="focus-ring flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-slate-600 transition hover:bg-slate-100"
+          className="focus-ring flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[var(--panel-soft)] text-[var(--primary-dark)] transition hover:bg-[#d7ecdf]"
           onClick={onClose}
           type="button"
         >
@@ -84,10 +84,10 @@ export function DaySummaryPanel({ summary, financeTimezone, panelId, onClose }: 
         <ul aria-label="Category breakdown" className="mt-3 flex flex-wrap gap-2 border-t border-[var(--border)] pt-3">
           {categoryTotals.map((entry) => (
             <li
-              className="flex items-baseline gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs"
+              className="flex items-baseline gap-1.5 rounded-full bg-[var(--panel-soft)] px-2.5 py-1 text-xs"
               key={entry.category}
             >
-              <span className="font-medium text-slate-700">{entry.category}</span>
+              <span className="font-medium text-[var(--primary-dark)]">{entry.category}</span>
               <span className="font-semibold tabular-nums text-slate-950">
                 {formatCurrency(entry.total)}
               </span>

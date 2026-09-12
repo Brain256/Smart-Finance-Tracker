@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
 import { deleteExpense } from "@/app/dashboard/actions";
@@ -8,6 +8,12 @@ import { CalendarHeatmap } from "@/components/finance/calendar-heatmap";
 import { OverviewPanel } from "@/components/finance/overview-panel";
 import { SettingsPanel } from "@/components/finance/settings-panel";
 import { TransactionsPanel } from "@/components/finance/transactions-panel";
+import {
+  DashboardNavigation,
+  getDashboardPanelId,
+  getDashboardTabId,
+  type DashboardTabKey
+} from "@/components/dashboard-navigation";
 import { addCalendarMonths, getFinanceMonthKey } from "@/lib/finance-analytics";
 import { formatCurrency } from "@/lib/format";
 import type {
@@ -33,18 +39,19 @@ type DashboardClientProps = {
   trend: FeatureLoadState<TrendPoint[]>;
   accuracy: FeatureLoadState<ClassificationAccuracy>;
 };
-type TabKey = "overview" | "calendar" | "transactions" | "settings";
 
-const tabs: Array<{ key: TabKey; label: string }> = [
-  { key: "overview", label: "Overview" },
-  { key: "calendar", label: "Calendar" },
-  { key: "transactions", label: "Transactions" },
-  { key: "settings", label: "Settings" }
-];
-
-export function DashboardClient({ canDelete, expenses, financeTimezone, reviewThreshold, incomeRecords, savingsTarget, trend, accuracy }: DashboardClientProps) {
+export function DashboardClient({
+  canDelete,
+  expenses,
+  financeTimezone,
+  reviewThreshold,
+  incomeRecords,
+  savingsTarget,
+  trend,
+  accuracy
+}: DashboardClientProps) {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<TabKey>("overview");
+  const [activeTab, setActiveTab] = useState<DashboardTabKey>("overview");
   const [displayedExpenses, setDisplayedExpenses] = useState(expenses);
   const [monthKey, setMonthKey] = useState(() => getFinanceMonthKey(new Date(), financeTimezone));
   const [activeCellKey, setActiveCellKey] = useState<string | null>(null);
@@ -55,10 +62,18 @@ export function DashboardClient({ canDelete, expenses, financeTimezone, reviewTh
   const [deletingExpenseId, setDeletingExpenseId] = useState<number | null>(null);
   const [isDeletePending, startDeleteTransition] = useTransition();
   const [sortState, setSortState] = useState<SortState>({ key: "timestamp", direction: "desc" });
+  const [shouldFocusTransactionsHeading, setShouldFocusTransactionsHeading] = useState(false);
+  const transactionsHeadingRef = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
     setDisplayedExpenses(expenses);
   }, [expenses]);
+
+  useEffect(() => {
+    if (!shouldFocusTransactionsHeading || activeTab !== "transactions") return;
+    transactionsHeadingRef.current?.focus();
+    setShouldFocusTransactionsHeading(false);
+  }, [activeTab, shouldFocusTransactionsHeading]);
 
   function handleDelete(expense: ExpenseRecord): void {
     if (!window.confirm(`Delete the ${formatCurrency(expense.amount)} transaction from ${expense.merchantName}?`)) return;
@@ -79,8 +94,20 @@ export function DashboardClient({ canDelete, expenses, financeTimezone, reviewTh
   }
 
   function handleCorrection(correctedExpense: ExpenseRecord): void {
-    setDisplayedExpenses((current) => current.map((expense) => expense.id === correctedExpense.id ? correctedExpense : expense));
+    setDisplayedExpenses((current) =>
+      current.map((expense) => expense.id === correctedExpense.id ? correctedExpense : expense)
+    );
     router.refresh();
+  }
+
+  function handleTabSelect(tab: DashboardTabKey): void {
+    setShouldFocusTransactionsHeading(false);
+    setActiveTab(tab);
+  }
+
+  function handleOpenTransactions(): void {
+    setShouldFocusTransactionsHeading(true);
+    setActiveTab("transactions");
   }
 
   const changeMonth = (offset: number) => {
@@ -89,5 +116,67 @@ export function DashboardClient({ canDelete, expenses, financeTimezone, reviewTh
     setMonthKey((current) => addCalendarMonths(current, offset));
   };
 
-  return <div className="flex min-w-0 flex-col gap-5" data-finance-timezone={financeTimezone} data-review-threshold={reviewThreshold}><nav aria-label="Dashboard sections" className="grid grid-cols-2 rounded-lg border border-[var(--border)] bg-white p-1 shadow-sm sm:grid-cols-4">{tabs.map((tab) => <button aria-selected={activeTab === tab.key} className={`focus-ring h-10 rounded-md px-2 text-sm font-medium transition ${activeTab === tab.key ? "bg-[var(--primary)] text-white" : "text-slate-600 hover:bg-slate-50"}`} key={tab.key} onClick={() => setActiveTab(tab.key)} role="tab" type="button">{tab.label}</button>)}</nav>{activeTab === "overview" ? <OverviewPanel expenses={displayedExpenses} financeTimezone={financeTimezone} incomeRecords={incomeRecords} onOpenCalendar={() => setActiveTab("calendar")} savingsTarget={savingsTarget} trend={trend} /> : null}{activeTab === "calendar" ? <CalendarHeatmap activeCellKey={activeCellKey} expenses={displayedExpenses} financeTimezone={financeTimezone} monthKey={monthKey} onActiveCellKeyChange={setActiveCellKey} onChangeMonth={changeMonth} onSelectDate={setSelectedDateKey} selectedDateKey={selectedDateKey} /> : null}{activeTab === "transactions" ? <TransactionsPanel accuracy={accuracy} canDelete={canDelete} deleteError={deleteError} deletingExpenseId={deletingExpenseId} expenses={displayedExpenses} financeTimezone={financeTimezone} isDeletePending={isDeletePending} onCorrection={handleCorrection} onDelete={handleDelete} onSortStateChange={setSortState} reviewThreshold={reviewThreshold} sortState={sortState} /> : null}{activeTab === "settings" ? <SettingsPanel incomeRecords={incomeRecords} savingsTarget={savingsTarget} /> : null}</div>;
+  return (
+    <div
+      className="grid min-w-0 items-start gap-6 pb-24 lg:grid-cols-[15rem_minmax(0,1fr)] lg:gap-8 lg:pb-0"
+      data-finance-timezone={financeTimezone}
+      data-review-threshold={reviewThreshold}
+    >
+      <DashboardNavigation activeTab={activeTab} onSelect={handleTabSelect} />
+
+      <div className="min-w-0 w-full">
+        <div
+          aria-labelledby={getDashboardTabId(activeTab)}
+          className="dashboard-tab-content min-w-0 w-full"
+          id={getDashboardPanelId(activeTab)}
+          key={activeTab}
+          role="tabpanel"
+        >
+        {activeTab === "overview" ? (
+          <OverviewPanel
+            expenses={displayedExpenses}
+            financeTimezone={financeTimezone}
+            incomeRecords={incomeRecords}
+            onOpenCalendar={() => handleTabSelect("calendar")}
+            onOpenTransactions={handleOpenTransactions}
+            savingsTarget={savingsTarget}
+            trend={trend}
+          />
+        ) : null}
+        {activeTab === "calendar" ? (
+          <CalendarHeatmap
+            activeCellKey={activeCellKey}
+            expenses={displayedExpenses}
+            financeTimezone={financeTimezone}
+            monthKey={monthKey}
+            onActiveCellKeyChange={setActiveCellKey}
+            onChangeMonth={changeMonth}
+            onSelectDate={setSelectedDateKey}
+            selectedDateKey={selectedDateKey}
+          />
+        ) : null}
+        {activeTab === "transactions" ? (
+          <TransactionsPanel
+            accuracy={accuracy}
+            canDelete={canDelete}
+            deleteError={deleteError}
+            deletingExpenseId={deletingExpenseId}
+            expenses={displayedExpenses}
+            financeTimezone={financeTimezone}
+            headingRef={transactionsHeadingRef}
+            isDeletePending={isDeletePending}
+            onCorrection={handleCorrection}
+            onDelete={handleDelete}
+            onSortStateChange={setSortState}
+            reviewThreshold={reviewThreshold}
+            sortState={sortState}
+          />
+        ) : null}
+        {activeTab === "settings" ? (
+          <SettingsPanel incomeRecords={incomeRecords} savingsTarget={savingsTarget} />
+        ) : null}
+        </div>
+      </div>
+    </div>
+  );
 }

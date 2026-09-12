@@ -46,6 +46,7 @@ vi.mock("@/app/dashboard/actions", () => ({
   saveSavingsTarget: saveSavingsTargetMock,
   deleteSavingsTarget: deleteSavingsTargetMock
 }));
+vi.mock("@/app/login/actions", () => ({ signOutOfDashboard: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: routerRefreshMock }) }));
 
 const FINANCE_TIMEZONE = "America/Toronto";
@@ -108,10 +109,10 @@ const unavailableSnapshot: SnapshotProps = {
   accuracy: unavailable("Classification accuracy is unavailable.")
 };
 
-function renderDashboard(expenses: ExpenseRecord[], snapshot: Partial<SnapshotProps> = {}) {
+function renderDashboard(expenses: ExpenseRecord[], snapshot: Partial<SnapshotProps> = {}, canDelete = false) {
   return render(
     <DashboardClient
-      canDelete={false}
+      canDelete={canDelete}
       expenses={expenses}
       financeTimezone={FINANCE_TIMEZONE}
       reviewThreshold={0.7}
@@ -149,16 +150,89 @@ describe("DashboardClient composition", () => {
 
     renderDashboard([]);
 
+    expect(screen.getByRole("navigation", { name: "Dashboard sections" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute("title", "Overview");
+    expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-controls", "dashboard-panel-overview");
+    expect(screen.getByRole("tabpanel", { name: "Overview" })).toHaveAttribute("id", "dashboard-panel-overview");
+    expect(screen.getByText("Welcome back")).toBeInTheDocument();
+    expect(screen.getByText("Brian")).toBeInTheDocument();
+    const spendingSummary = screen.getByRole("region", { name: "Spending summary" });
+    expect(within(spendingSummary).getByText("Today")).toBeInTheDocument();
+    expect(within(spendingSummary).getByText("This week")).toBeInTheDocument();
+    expect(within(spendingSummary).getByText("This month")).toBeInTheDocument();
+    expect(within(spendingSummary).getByText("All time")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Spending against budget" })).toBeInTheDocument();
     expect(screen.getByText("Spending today")).toBeInTheDocument();
+    expect(screen.getByText("Spending this week")).toBeInTheDocument();
+    expect(screen.getByText("Spending this month")).toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "Calendar" }));
+    expect(screen.getByRole("tabpanel", { name: "Calendar" })).toHaveAttribute("id", "dashboard-panel-calendar");
     expect(screen.getByRole("button", { name: "Previous month" })).toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "Transactions" }));
+    expect(screen.getByRole("tabpanel", { name: "Transactions" })).toHaveAttribute("id", "dashboard-panel-transactions");
     expect(screen.getByRole("heading", { name: "Transactions" })).toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "Settings" }));
     expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Income history" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Savings target" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Category budgets" })).not.toBeInTheDocument();
+  });
+
+  it("shows the five newest spending transactions and opens Transactions from a row", async () => {
+    const user = userEvent.setup();
+    renderDashboard([
+      expense({ id: 1, merchantName: "Old Expense", timestamp: "2025-01-01T17:00:00.000Z" }),
+      expense({ id: 2, merchantName: "Second Expense", timestamp: "2025-01-10T17:00:00.000Z" }),
+      expense({ id: 3, merchantName: "Third Expense", timestamp: "2025-01-11T17:00:00.000Z" }),
+      expense({ id: 4, merchantName: "Fourth Expense", timestamp: "2025-01-12T17:00:00.000Z" }),
+      expense({ id: 5, merchantName: "Fifth Expense", timestamp: "2025-01-13T17:00:00.000Z" }),
+      expense({ id: 6, merchantName: "Newest Expense", timestamp: "2025-01-14T17:00:00.000Z" }),
+      expense({ id: 99, merchantName: "Paycheque", category: "Income", amount: 2000, timestamp: "2025-01-15T17:00:00.000Z" })
+    ]);
+
+    const recent = screen.getByRole("region", { name: "Recent transactions" });
+    const recentList = within(recent).getByRole("list", { name: "Recent spending transactions" });
+    const rows = within(recentList).getAllByRole("listitem");
+
+    expect(rows).toHaveLength(5);
+    expect(rows.map((row) => row.textContent?.trim())).toEqual([
+      expect.stringContaining("Newest Expense"),
+      expect.stringContaining("Fifth Expense"),
+      expect.stringContaining("Fourth Expense"),
+      expect.stringContaining("Third Expense"),
+      expect.stringContaining("Second Expense")
+    ]);
+    expect(within(recentList).queryByText("Old Expense")).not.toBeInTheDocument();
+    expect(within(recentList).queryByText("Paycheque")).not.toBeInTheDocument();
+
+    await user.click(within(rows[0]).getByRole("button", { name: /Open transaction from Newest Expense/ }));
+
+    expect(screen.getByRole("tab", { name: "Transactions" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("heading", { name: "Transactions" })).toHaveFocus();
+
+    await user.click(screen.getByRole("tab", { name: "Overview" }));
+    const keyboardRow = within(screen.getByRole("region", { name: "Recent transactions" }))
+      .getByRole("button", { name: /Open transaction from Second Expense/ });
+    keyboardRow.focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("tab", { name: "Transactions" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("shows available spending rows and an explicit empty state", () => {
+    const { unmount } = renderDashboard([
+      expense({ id: 1, merchantName: "Only Expense" }),
+      expense({ id: 2, merchantName: "Income Record", category: "Income" })
+    ]);
+
+    const recent = screen.getByRole("region", { name: "Recent transactions" });
+    expect(within(recent).getAllByRole("listitem")).toHaveLength(1);
+    expect(within(recent).getByText("Only Expense")).toBeInTheDocument();
+    expect(within(recent).queryByText("Income Record")).not.toBeInTheDocument();
+
+    unmount();
+    renderDashboard([]);
+    expect(screen.getByText("No spending transactions have been recorded yet.")).toBeInTheDocument();
   });
 
   it("focuses the matching editor and replaces a successfully corrected low-confidence row", async () => {
@@ -172,8 +246,8 @@ describe("DashboardClient composition", () => {
     renderDashboard([lowConfidenceExpense, historicalExpense]);
     await user.click(screen.getByRole("tab", { name: "Transactions" }));
 
-    const categorySelect = screen.getByLabelText("Category for Corner Market");
     await user.click(screen.getByRole("button", { name: "Unverified category for Corner Market. Focus category editor" }));
+    const categorySelect = screen.getByLabelText("Category for Corner Market");
     expect(categorySelect).toHaveFocus();
     expect(screen.getByText("Confidence unavailable")).toBeInTheDocument();
 
@@ -181,7 +255,9 @@ describe("DashboardClient composition", () => {
     await user.click(screen.getByRole("button", { name: "Save category for Corner Market" }));
 
     await waitFor(() => expect(correctExpenseCategoryMock).toHaveBeenCalledWith(17, "Food"));
-    expect(screen.getByDisplayValue("Food")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByLabelText("Category for Corner Market")).not.toBeInTheDocument());
+    const correctedRow = screen.getAllByRole("row").find((row) => row.textContent?.includes("Corner Market")) as HTMLElement;
+    expect(within(correctedRow).getAllByRole("cell")[2]).toHaveTextContent("Food");
     expect(screen.queryByRole("button", { name: /Unverified category for Corner Market/ })).not.toBeInTheDocument();
     expect(routerRefreshMock).toHaveBeenCalledTimes(1);
   });
@@ -193,6 +269,7 @@ describe("DashboardClient composition", () => {
     renderDashboard([lowConfidenceExpense]);
     await user.click(screen.getByRole("tab", { name: "Transactions" }));
 
+    await user.click(screen.getByRole("button", { name: "Unverified category for Corner Market. Focus category editor" }));
     const categorySelect = screen.getByLabelText("Category for Corner Market");
     await user.selectOptions(categorySelect, "Food");
     await user.click(screen.getByRole("button", { name: "Save category for Corner Market" }));
@@ -212,6 +289,7 @@ describe("DashboardClient composition", () => {
     renderDashboard([lowConfidenceExpense]);
     await user.click(screen.getByRole("tab", { name: "Transactions" }));
 
+    await user.click(screen.getByRole("button", { name: "Unverified category for Corner Market. Focus category editor" }));
     const categorySelect = screen.getByLabelText("Category for Corner Market");
     await user.selectOptions(categorySelect, "Food");
     await user.selectOptions(categorySelect, "Transport");
@@ -220,6 +298,15 @@ describe("DashboardClient composition", () => {
     expect(screen.getByRole("button", { name: "Save category for Corner Market" })).toBeDisabled();
     expect(correctExpenseCategoryMock).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: /Unverified category for Corner Market/ })).toBeInTheDocument();
+  });
+  it("renders pencil and trash actions as compact accessible controls", async () => {
+    const user = userEvent.setup();
+
+    renderDashboard([expense({ id: 20, merchantName: "Corner Cafe" })], {}, true);
+    await user.click(screen.getByRole("tab", { name: "Transactions" }));
+
+    expect(screen.getByRole("button", { name: "Edit category for Corner Cafe" })).toHaveAttribute("title", "Edit category");
+    expect(screen.getByRole("button", { name: "Delete transaction from Corner Cafe" })).toHaveAttribute("title", "Delete transaction");
   });
 });
 
@@ -319,13 +406,13 @@ describe("Overview accuracy and planning presentation", () => {
   it("removes the standalone net panel while keeping Income out of spending totals", () => {
     const expenses = [
       expense({ id: 1, amount: 2000, category: "Income", merchantName: "Payroll" }),
-      expense({ id: 2, amount: 250, category: "Food" })
+      expense({ id: 2, amount: 250, category: "Food", timestamp: "2025-01-15T17:00:00.000Z" })
     ];
 
     renderDashboard(expenses);
 
     expect(screen.queryByRole("heading", { name: "Net this month" })).not.toBeInTheDocument();
-    expect(screen.getByText("$250.00")).toBeInTheDocument();
+    expect(screen.getAllByText("$250.00").length).toBeGreaterThan(0);
     expect(screen.queryByText("$1,750.00")).not.toBeInTheDocument();
   });
 
@@ -362,7 +449,7 @@ describe("Overview accuracy and planning presentation", () => {
   });
 
   it("marks only the related capability unavailable without hiding real expenses", () => {
-    renderDashboard([expense({ id: 1, amount: 25 })], { trend: unavailable("Spending trend is unavailable.") });
+    renderDashboard([expense({ id: 1, amount: 25, timestamp: "2025-01-15T17:00:00.000Z" })], { trend: unavailable("Spending trend is unavailable.") });
 
     expect(screen.getByText("Spending trend is unavailable.")).toBeInTheDocument();
     expect(screen.getAllByText("$25.00").length).toBeGreaterThan(0);
@@ -451,6 +538,7 @@ describe("Calendar heatmap", () => {
     await user.click(screen.getByRole("tab", { name: "Calendar" }));
 
     expect(screen.getByRole("heading", { name: "January 2025" })).toBeInTheDocument();
+    expect(screen.getByLabelText("January 2025 total spending")).toHaveTextContent("$0.00 total spending");
     expect(cells()).toHaveLength(31);
     expect(cells().map((cell) => cell.getAttribute("data-date"))).toEqual(
       Array.from({ length: 31 }, (_, index) => `2025-01-${String(index + 1).padStart(2, "0")}`)
@@ -476,25 +564,36 @@ describe("Calendar heatmap", () => {
     const byDate = new Map(cells().map((cell) => [cell.getAttribute("data-date"), cell]));
     expect(byDate.get("2025-01-08")?.getAttribute("data-level")).toBe("4");
     expect(byDate.get("2025-01-09")?.getAttribute("data-level")).toBe("0");
+    expect(screen.getByLabelText("January 2025 total spending")).toHaveTextContent("$40.00 total spending");
+    expect(byDate.get("2025-01-15")).toHaveAttribute("data-today", "true");
+    expect(byDate.get("2025-01-15")).toHaveAttribute("aria-current", "date");
     expect(byDate.get("2025-01-08")).toHaveAttribute(
       "aria-label",
       "Jan 8, 2025: $40.00 spent, highest spending"
     );
   });
 
-  it("keeps month navigation and renders each month at its real length", async () => {
-    renderDashboard([]);
+  it("keeps month navigation, updates totals, and renders each month at its real length", async () => {
+    renderDashboard([
+      expense({ id: 1, amount: 40, timestamp: "2025-01-08T17:00:00.000Z" }),
+      expense({ id: 2, amount: 12, timestamp: "2025-02-08T17:00:00.000Z" }),
+      expense({ id: 3, amount: 999, category: "Income", timestamp: "2025-02-09T17:00:00.000Z" })
+    ]);
     const user = userEvent.setup();
     await user.click(screen.getByRole("tab", { name: "Calendar" }));
 
+    expect(screen.getByLabelText("January 2025 total spending")).toHaveTextContent("$40.00 total spending");
     await user.click(screen.getByRole("button", { name: "Previous month" }));
     expect(screen.getByRole("heading", { name: "December 2024" })).toBeInTheDocument();
+    expect(screen.getByLabelText("December 2024 total spending")).toHaveTextContent("$0.00 total spending");
     expect(cells()).toHaveLength(31);
 
     await user.click(screen.getByRole("button", { name: "Next month" }));
     await user.click(screen.getByRole("button", { name: "Next month" }));
     expect(screen.getByRole("heading", { name: "February 2025" })).toBeInTheDocument();
+    expect(screen.getByLabelText("February 2025 total spending")).toHaveTextContent("$12.00 total spending");
     expect(cells()).toHaveLength(28);
+    expect(cells().some((cell) => cell.getAttribute("data-today") === "true")).toBe(false);
   });
 
   it("opens one detail at a time and labels every legend intensity level", async () => {

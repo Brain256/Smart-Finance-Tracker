@@ -172,4 +172,5 @@ export type PeriodMetrics = {
   today: number;
   week: number;
   month: number;
+  allTime: number;
 };
