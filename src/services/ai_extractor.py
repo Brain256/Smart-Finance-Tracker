@@ -5,7 +5,7 @@ from typing import Final
 
 import instructor
 from dotenv import load_dotenv
-from instructor import AsyncInstructor
+from instructor import AsyncInstructor, Mode
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
@@ -54,7 +54,10 @@ def _build_instructor_client() -> AsyncInstructor:
     openai_client = AsyncOpenAI(api_key=api_key, base_url=GROQ_BASE_URL)
 
     # Instructor enforces the LlmClassification response schema at the client edge.
-    return instructor.from_openai(openai_client)
+    return instructor.from_openai(
+        openai_client,
+        mode=Mode.JSON,
+    )
 
 
 def _get_model_name() -> str:
