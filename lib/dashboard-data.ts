@@ -193,7 +193,7 @@ export function getDashboardDateWindow(now: Date, timeZone: string): DashboardDa
 function unavailable<T>(featureName: string): FeatureLoadState<T> {
   return {
     status: "unavailable",
-    reason: `${featureName} is unavailable. Apply the required migration and verify dashboard configuration.`
+    reason: `${featureName} is unavailable. Apply supabase/expenses.sql and verify dashboard configuration.`
   };
 }
 

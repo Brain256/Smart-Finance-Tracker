@@ -1,5 +1,9 @@
--- Fresh-install bootstrap only. Existing databases must use supabase/migrations/
--- in sequence; this file deliberately does not upgrade an existing schema.
+-- Complete schema. Run once against an empty Supabase project to create every
+-- table, index, constraint, trigger, and RPC the application expects.
+--
+-- Idempotent by construction (create if not exists / create or replace), so a
+-- rerun against an already-provisioned database is a no-op. It does not migrate
+-- an existing table whose columns differ from the definitions below.
 
 begin;
 

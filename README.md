@@ -15,7 +15,7 @@ expense row in Postgres.**
 Smart Finance Tracker uses Google Wallet notifications as a real-time transaction
 source, so expenses can be captured across multiple cards without connecting to
 individual bank APIs. The Android client forwards notifications to a FastAPI
-service, which classifies them and stores structured transactions in Postgres.
+service, which classifies them and stores structured transactions in Postgres. 
 
 ## Screenshot
 
@@ -34,7 +34,7 @@ flowchart TB
 
   subgraph clients["Clients"]
     android["Android client<br/>Notification listener<br/>Offline queue"]
-    dashboard["Next.js dashboard<br/>Google OAuth<br/>Budgets + projections"]
+    dashboard["Next.js dashboard<br/>Google OAuth<br/>Budgets + projections<br/>AI chat assistant"]
   end
 
   subgraph backend["FastAPI ingestion service"]
@@ -61,24 +61,47 @@ flowchart TB
 | Classification | `instructor` + Groq | Extract typed fields from free text; apply learned corrections |
 | Storage | Supabase Postgres | Idempotent writes, correction audit log, analytics RPCs |
 | Dashboard | Next.js App Router, Auth.js, Recharts | Private analytics, review queue, budget planning |
+| Assistant | Groq tool calling, TypeScript | Answer questions through whitelisted read-only queries; never composes SQL |
+
+
+## Chat assistant
+
+The **Assistant** tab answers natural-language questions about recorded
+transactions using tool calling such as "how much did I spend at Tim Hortons last month," "which merchant
+cost me the most this year." A Groq model
+picks from two read-only tools and fills in their arguments; the tools run
+parameterized Supabase queries.
+
+```mermaid
+flowchart LR
+  panel["Assistant panel"] -->|"messages"| route["POST /api/chat<br/>session gate"]
+  route --> agent["chat-agent<br/>system prompt + tool loop"]
+  agent -->|"tool schemas"| groq["Groq<br/>gpt-oss-120b"]
+  groq -->|"tool calls"| agent
+  agent --> tools["chat-tools<br/>validate + query"]
+  tools --> db["Supabase<br/>expenses"]
+  db --> tools
+  tools --> agent
+  agent -->|"reply + lookups"| route
+```
+
+| Tool | Returns |
+| --- | --- |
+| `search_transactions` | Individual rows, newest first, up to 50 |
+| `aggregate_spending` | Total, transaction count, per-category breakdown, optional top-10 merchant ranking |
+
+Design rationale and the full list of known limitations are in
+[`docs/ASSISTANT.md`](docs/ASSISTANT.md).
 
 ## Testing
 
 ```powershell
-python -m pytest      # 51 passed — ingestion, schemas, AI layer, database
+python -m pytest      # 49 passed — ingestion, schemas, AI layer, database
 npx.cmd vitest run    # 365 passed — analytics, data loading, server actions, assistant, UI
 ```
 
 Groq and Supabase are mocked throughout, so the full suite runs with no network
 access and no API keys.
-
-Beyond example-based tests, the correctness-critical logic is covered by
-property-based tests — Hypothesis on the Python side
-(`tests/test_analytics_properties.py`) and fast-check on the TypeScript side
-(`lib/finance-analytics.properties.test.ts`), 100 generated examples each. These
-assert invariants rather than fixtures: income never leaks into a spending
-aggregate, cents-based sums never drift, budget state bands never overlap, and
-configuration parsing either yields a valid value or raises.
 
 ## Getting started
 
@@ -137,13 +160,9 @@ Cloud Console.
 
 ### Database
 
-For a **new, empty Supabase project**, run
-[`supabase/expenses.sql`](supabase/expenses.sql) once in the SQL Editor — it is
-the complete fresh-install schema.
-
-For an **existing database**, do not run that file. Apply the ordered migrations
-in [`supabase/migrations/`](supabase/migrations/README.md) instead, following
-[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+Run [`supabase/expenses.sql`](supabase/expenses.sql) once in the Supabase SQL
+Editor. It creates every table, index, constraint, trigger, and RPC the
+application expects, and is idempotent, so a rerun is a no-op.
 
 ### Run it
 
@@ -203,52 +222,6 @@ access** permission granted. Full walkthrough in
 }
 ```
 
-## Chat assistant
-
-The **Assistant** tab answers natural-language questions about recorded
-transactions — "how much did I spend at Tim Hortons last month," "which merchant
-cost me the most this year," "how does August compare to July." A Groq model
-picks from two read-only tools and fills in their arguments; the tools run
-whitelisted, parameterized Supabase queries.
-
-```mermaid
-flowchart LR
-  panel["Assistant panel"] -->|"messages"| route["POST /api/chat<br/>session gate"]
-  route --> agent["chat-agent<br/>system prompt + tool loop"]
-  agent -->|"tool schemas"| groq["Groq<br/>gpt-oss-120b"]
-  groq -->|"tool calls"| agent
-  agent --> tools["chat-tools<br/>validate + query"]
-  tools --> db["Supabase<br/>expenses"]
-  db --> tools
-  tools --> agent
-  agent -->|"reply + lookups"| route
-```
-
-| Tool | Returns |
-| --- | --- |
-| `search_transactions` | Individual rows, newest first, up to 50 |
-| `aggregate_spending` | Total, transaction count, per-category breakdown, optional top-10 merchant ranking |
-
-Both accept the same filters — inclusive date range, one category, a merchant
-name fragment — and differ only in what comes back. The model never composes SQL
-and never receives database credentials. Because the dashboard's Supabase client
-uses the service role key and bypasses row-level security, the fixed tool
-whitelist in [`lib/chat-tools.ts`](lib/chat-tools.ts) is the only barrier between
-model output and a fully privileged connection; every argument is validated
-before a query is built.
-
-Replies list the lookups that produced them, so a misstated period is visible
-next to the number it produced.
-
-**Known limitations**, deliberately deferred — see
-[`docs/ASSISTANT.md`](docs/ASSISTANT.md) for detail:
-
-- Answers are not streamed, and a multi-lookup question can take up to ~20s.
-- Groq's free tier allows 8,000 tokens per minute, roughly 1–2 questions per
-  minute before rate limiting.
-- Read-only: the assistant cannot correct or delete transactions.
-- No sorting by amount, so "my three biggest transactions" is not answerable.
-
 ## Project structure
 
 ```text
@@ -257,21 +230,26 @@ src/
   core/           Security, database client, finance configuration
   schemas/        Pydantic v2 request/response contracts
   services/       LLM extraction layer
+scripts/          Schema export utility
 app/              Next.js App Router — dashboard, auth, server actions, chat endpoint
 components/       React UI, including the finance panel components
 lib/              Analytics, data loading, mutations, shared types
-supabase/         Fresh-install schema plus ordered migrations
+auth.ts           Auth.js configuration
+proxy.ts          Route middleware enforcing the session gate
+schema.json       Generated Pydantic contract export
+supabase/         Complete database schema
 AndroidClient/    Kotlin notification capture app
 tests/            Python test suite (pytest + Hypothesis)
-docs/             Architecture, deployment, Android setup, roadmap
+docs/             Architecture, Android setup, assistant design, roadmap
 ```
+
+TypeScript tests live beside the modules they cover as `*.test.ts` / `*.test.tsx`
+rather than in a separate tree.
 
 ## Documentation
 
 - [Architecture & design decisions](docs/ARCHITECTURE.md) — why the schema and
   analytics work the way they do
-- [Deployment runbook](docs/DEPLOYMENT.md) — ordered migrations, verification,
-  rollback
 - [Android client setup](docs/ANDROID_CLIENT.md) — capture layer walkthrough
 - [Chat assistant](docs/ASSISTANT.md) — tool-calling design, security model, and
   known limitations

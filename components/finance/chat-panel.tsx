@@ -161,10 +161,6 @@ export function ChatPanel({ isEnabled, disabledReason }: ChatPanelProps) {
           >
             {isEmpty ? (
               <div className="rounded-2xl border border-dashed border-[var(--border)] bg-[var(--panel-soft)] px-4 py-6">
-                <p className="text-sm text-[var(--muted)]">
-                  Answers come only from transactions the tracker captured, so they are not a
-                  complete bank statement.
-                </p>
                 <ul aria-label="Example questions" className="mt-4 flex flex-wrap gap-2">
                   {SUGGESTIONS.map((suggestion) => (
                     <li key={suggestion}>

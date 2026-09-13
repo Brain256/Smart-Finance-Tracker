@@ -2,8 +2,8 @@
 
 This document records the non-obvious design decisions behind the finance
 tracker — the ones where a reasonable alternative existed and the reasoning for
-rejecting it matters. Setup lives in the [README](../README.md); the migration
-and rollout procedure lives in [DEPLOYMENT.md](DEPLOYMENT.md).
+rejecting it matters. Setup lives in the [README](../README.md); the assistant's
+tool-calling design lives in [ASSISTANT.md](ASSISTANT.md).
 
 ## Stack
 
@@ -14,6 +14,7 @@ and rollout procedure lives in [DEPLOYMENT.md](DEPLOYMENT.md).
 | Classification | `instructor` over the OpenAI SDK, targeting Groq |
 | Storage | Supabase PostgreSQL (`supabase-py`) |
 | Dashboard | Next.js App Router, TypeScript, Auth.js, Recharts |
+| Assistant | Groq tool calling over whitelisted read-only queries |
 
 ## 1. Finance-time boundary
 
@@ -116,7 +117,28 @@ stay visible, unavailable confidence is never coerced to zero, and a missing
 planning prerequisite renders a named incomplete state rather than a misleading
 `$0`.
 
-## 7. Idempotent ingestion
+## 7. The tool whitelist is the assistant's security boundary
+
+`createSupabaseExpenseClient()` uses the service role key and bypasses row-level
+security. The assistant therefore sits in front of a fully privileged
+connection, and no database-level control constrains it — the fixed tool
+whitelist in `lib/chat-tools.ts` is the entire boundary.
+
+That forces the design: the model selects a tool name and fills declared
+arguments, never composing SQL and never receiving credentials. Every argument is
+validated before a query is built, unknown tool names and malformed argument JSON
+resolve to error results rather than exceptions, and the route rejects `system`
+and `tool` roles so a caller cannot forge a tool result or override the agent's
+instructions.
+
+The alternative — letting the model emit SQL against a restricted role — was
+rejected because it would require maintaining a second, narrower database role
+and trusting a parser to reject everything harmful. A closed set of two
+parameterized queries is a smaller surface to reason about, and it is testable
+without a database. Per-decision rationale is in
+[ASSISTANT.md](ASSISTANT.md).
+
+## 8. Idempotent ingestion
 
 The `expenses` table carries a composite unique constraint on
 `(merchant_name, amount, timestamp)`. The Android client retries failed POSTs

@@ -161,14 +161,13 @@ truncated ranking is not mistaken for the full list, but a question about the
 
 ### Scaling
 
-Merchant containment uses a leading wildcard (`ilike '%x%'`), which cannot use
-the btree index on `normalized_merchant` — that filter is a sequential scan. The
-timestamp and `(category, timestamp)` indexes are used. Irrelevant at
-single-user volume; a table in the millions would want a `pg_trgm` index.
-
+Merchant containment uses a leading wildcard (`ilike '%x%'`), so that filter
+cannot use the btree index on `normalized_merchant` and falls back to a
+sequential scan; the timestamp and `(category, timestamp)` indexes are used.
 Merchant grouping also happens in TypeScript rather than Postgres, so a wide
-range transfers every matching row. A `group by normalized_merchant` RPC would
-return 10 rows instead, at the cost of a migration and logic in two languages.
+range transfers every matching row rather than ten. Both are irrelevant at
+single-user volume and both have known fixes — a `pg_trgm` index and a
+`group by normalized_merchant` RPC.
 
 ### No rate limiting of our own
 
