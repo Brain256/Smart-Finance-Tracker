@@ -15,13 +15,35 @@ expense row in Postgres.**
 Smart Finance Tracker uses Google Wallet notifications as a real-time transaction
 source, so expenses can be captured across multiple cards without connecting to
 individual bank APIs. The Android client forwards notifications to a FastAPI
-service, which classifies them and stores structured transactions in Postgres. 
+service, which classifies them and stores structured transactions in Postgres (Supabase). 
+A Next.js dashboard displays the transaction data and cash projections along with an AI assistant
+that answers open-ended questions through tool calling. 
 
-## Screenshot
+https://github.com/user-attachments/assets/66682f14-ce1d-45fc-9ae2-adc13714ec51
 
-<p align="center">
-  <img src="docs/images/overview.jpg" alt="Dashboard overview" width="60%" />
-</p>
+## Project structure
+
+```text
+api/              FastAPI entrypoint (Vercel serverless handler)
+src/
+  core/           Security, database client, finance configuration
+  schemas/        Pydantic v2 request/response contracts
+  services/       LLM extraction layer
+scripts/          Schema export utility
+app/              Next.js App Router — dashboard, auth, server actions, chat endpoint
+components/       React UI, including the finance panel components
+lib/              Analytics, data loading, mutations, shared types
+auth.ts           Auth.js configuration
+proxy.ts          Route middleware enforcing the session gate
+schema.json       Generated Pydantic contract export
+supabase/         Complete database schema
+AndroidClient/    Kotlin notification capture app
+tests/            Python test suite (pytest + Hypothesis)
+docs/             Architecture, Android setup, assistant design, roadmap
+```
+
+TypeScript tests live beside the modules they cover as `*.test.ts` / `*.test.tsx`
+rather than in a separate tree.
 
 ## Architecture
 
@@ -221,30 +243,6 @@ access** permission granted. Full walkthrough in
   }
 }
 ```
-
-## Project structure
-
-```text
-api/              FastAPI entrypoint (Vercel serverless handler)
-src/
-  core/           Security, database client, finance configuration
-  schemas/        Pydantic v2 request/response contracts
-  services/       LLM extraction layer
-scripts/          Schema export utility
-app/              Next.js App Router — dashboard, auth, server actions, chat endpoint
-components/       React UI, including the finance panel components
-lib/              Analytics, data loading, mutations, shared types
-auth.ts           Auth.js configuration
-proxy.ts          Route middleware enforcing the session gate
-schema.json       Generated Pydantic contract export
-supabase/         Complete database schema
-AndroidClient/    Kotlin notification capture app
-tests/            Python test suite (pytest + Hypothesis)
-docs/             Architecture, Android setup, assistant design, roadmap
-```
-
-TypeScript tests live beside the modules they cover as `*.test.ts` / `*.test.tsx`
-rather than in a separate tree.
 
 ## Documentation
 
