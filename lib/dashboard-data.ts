@@ -3,6 +3,7 @@ import {
   DEFAULT_REVIEW_THRESHOLD,
   getFinanceConfig
 } from "@/lib/finance-config";
+import { addCalendarDays, getFinanceDateKey, zonedMidnightToUtc } from "@/lib/finance-dates";
 import { sampleExpenses } from "@/lib/sample-data";
 import { createSupabaseExpenseClient, hasSupabaseDashboardConfig } from "@/lib/supabase-server";
 import {
@@ -174,68 +175,6 @@ function normalizeAccuracyRow(
     windowStart: window.startDate,
     windowEnd: window.endDate
   };
-}
-
-function getFinanceDateKey(date: Date, timeZone: string): string {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  }).formatToParts(date);
-  const values = Object.fromEntries(
-    parts
-      .filter((part) => part.type !== "literal")
-      .map((part) => [part.type, part.value])
-  );
-
-  return `${values.year}-${values.month}-${values.day}`;
-}
-
-function addCalendarDays(dateKey: string, days: number): string {
-  const [year, month, day] = dateKey.split("-").map(Number);
-  const result = new Date(Date.UTC(year, month - 1, day));
-  result.setUTCDate(result.getUTCDate() + days);
-  return result.toISOString().slice(0, 10);
-}
-
-function getTimeZoneOffsetMilliseconds(instant: Date, timeZone: string): number {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23"
-  }).formatToParts(instant);
-  const values = Object.fromEntries(
-    parts
-      .filter((part) => part.type !== "literal")
-      .map((part) => [part.type, part.value])
-  );
-
-  return (
-    Date.UTC(
-      Number(values.year),
-      Number(values.month) - 1,
-      Number(values.day),
-      Number(values.hour),
-      Number(values.minute),
-      Number(values.second)
-    ) - instant.getTime()
-  );
-}
-
-function zonedMidnightToUtc(dateKey: string, timeZone: string): string {
-  const [year, month, day] = dateKey.split("-").map(Number);
-  const utcGuess = new Date(Date.UTC(year, month - 1, day));
-  const initialOffset = getTimeZoneOffsetMilliseconds(utcGuess, timeZone);
-  const candidate = new Date(utcGuess.getTime() - initialOffset);
-  const correctedOffset = getTimeZoneOffsetMilliseconds(candidate, timeZone);
-
-  return new Date(utcGuess.getTime() - correctedOffset).toISOString();
 }
 
 export function getDashboardDateWindow(now: Date, timeZone: string): DashboardDateWindow {

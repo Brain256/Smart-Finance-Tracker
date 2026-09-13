@@ -5,12 +5,18 @@ import {
   LayoutDashboard,
   ListChecks,
   LogOut,
+  MessagesSquare,
   Settings
 } from "lucide-react";
 import { signOutOfDashboard } from "@/app/login/actions";
 import type { ComponentType, SVGProps } from "react";
 
-export type DashboardTabKey = "overview" | "calendar" | "transactions" | "settings";
+export type DashboardTabKey =
+  | "overview"
+  | "calendar"
+  | "transactions"
+  | "assistant"
+  | "settings";
 
 export function getDashboardTabId(tab: DashboardTabKey): string {
   return `dashboard-tab-${tab}`;
@@ -32,6 +38,7 @@ export const dashboardTabLabels: Record<DashboardTabKey, string> = {
   overview: "Overview",
   calendar: "Calendar",
   transactions: "Transactions",
+  assistant: "Assistant",
   settings: "Settings"
 };
 
@@ -39,6 +46,7 @@ const dashboardNavItems: DashboardNavItem[] = [
   { key: "overview", label: dashboardTabLabels.overview, icon: LayoutDashboard },
   { key: "calendar", label: dashboardTabLabels.calendar, icon: CalendarDays },
   { key: "transactions", label: dashboardTabLabels.transactions, icon: ListChecks },
+  { key: "assistant", label: dashboardTabLabels.assistant, icon: MessagesSquare },
   { key: "settings", label: dashboardTabLabels.settings, icon: Settings }
 ];
 
@@ -59,7 +67,7 @@ export function DashboardNavigation({ activeTab, onSelect }: DashboardNavigation
         <p className="mt-1 text-xs text-white/60">Your financial overview</p>
       </div>
 
-      <div className="grid min-w-0 flex-1 grid-cols-4 gap-1 lg:flex lg:flex-1 lg:flex-col lg:gap-2" role="tablist">
+      <div className="grid min-w-0 flex-1 grid-cols-5 gap-1 lg:flex lg:flex-1 lg:flex-col lg:gap-2" role="tablist">
         {dashboardNavItems.map(({ icon: Icon, key, label }) => {
           const isActive = activeTab === key;
           const stateClasses = isActive

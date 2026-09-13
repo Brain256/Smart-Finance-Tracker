@@ -310,6 +310,32 @@ describe("DashboardClient composition", () => {
   });
 });
 
+describe("Assistant tab", () => {
+  it("exposes an Assistant tab alongside the existing sections", async () => {
+    const user = userEvent.setup();
+    renderDashboard([], {}, true);
+
+    const tab = screen.getByRole("tab", { name: "Assistant" });
+    expect(tab).toHaveAttribute("aria-controls", "dashboard-panel-assistant");
+
+    await user.click(tab);
+
+    expect(screen.getByRole("region", { name: "Assistant" })).toBeInTheDocument();
+    expect(screen.getByLabelText(/ask a question about your transactions/i)).toBeInTheDocument();
+  });
+
+  it("disables the assistant when the dashboard is showing sample data", async () => {
+    const user = userEvent.setup();
+    // canDelete is false exactly when the snapshot fell back to demo data.
+    renderDashboard([], {}, false);
+
+    await user.click(screen.getByRole("tab", { name: "Assistant" }));
+
+    expect(screen.getByText(/unavailable while the dashboard is showing sample data/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/ask a question about your transactions/i)).not.toBeInTheDocument();
+  });
+});
+
 describe("Overview accuracy and planning presentation", () => {
   it("renders 90-day accuracy with its classified and corrected counts", async () => {
     renderDashboard([], {

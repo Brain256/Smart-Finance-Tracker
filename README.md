@@ -66,7 +66,7 @@ flowchart TB
 
 ```powershell
 python -m pytest      # 51 passed — ingestion, schemas, AI layer, database
-npx.cmd vitest run    # 75 passed — analytics, data loading, server actions, UI
+npx.cmd vitest run    # 365 passed — analytics, data loading, server actions, assistant, UI
 ```
 
 Groq and Supabase are mocked throughout, so the full suite runs with no network
@@ -109,8 +109,9 @@ npx auth secret                                                 # AUTH_SECRET
 | Variable | Used by | Default | Purpose |
 | --- | --- | --- | --- |
 | `INBOUND_SECRET_TOKEN` | FastAPI | — | Bearer token the Android client must present |
-| `GROQ_API_KEY` | FastAPI | — | Classification API key |
-| `GROQ_MODEL` | FastAPI | `llama-3.3-70b-versatile` | Optional model override |
+| `GROQ_API_KEY` | Both | — | Groq API key, used for classification and the chat assistant |
+| `GROQ_MODEL` | FastAPI | `openai/gpt-oss-20b` | Notification classification model |
+| `CHAT_GROQ_MODEL` | Next.js | `openai/gpt-oss-120b` | Chat assistant model |
 | `SUPABASE_URL` | Both | — | Project URL from **Project Settings → API** |
 | `SUPABASE_SERVICE_ROLE_KEY` | Both | — | Server-only; bypasses row-level security |
 | `FINANCE_TIMEZONE` | Both | `America/Toronto` | IANA zone driving every date boundary |
@@ -121,7 +122,13 @@ npx auth secret                                                 # AUTH_SECRET
 
 Set `FINANCE_TIMEZONE` and `REVIEW_THRESHOLD` **identically** in both runtimes.
 Never prefix any of these with `NEXT_PUBLIC_` — the service role key bypasses
-row-level security and must stay server-side.
+row-level security and must stay server-side, and `GROQ_API_KEY` is now read by
+both runtimes.
+
+Groq retires models on roughly a quarterly cadence, so both model names are
+configuration rather than constants. Check the
+[deprecation schedule](https://console.groq.com/docs/deprecations) before
+pinning a version.
 
 For Google OAuth, register the redirect URI
 `https://your-domain.vercel.app/api/auth/callback/google` (and
@@ -181,6 +188,7 @@ access** permission granted. Full walkthrough in
 | --- | --- |
 | `GET /api/v1/health` | Returns `{"status": "healthy"}` |
 | `POST /api/v1/ingest` | Bearer-authenticated. Accepts `notification_title`, `notification_text`, and `timestamp` (ISO 8601, Unix seconds, or Unix milliseconds). Returns `202` for a new transaction, `200` for a duplicate retry. |
+| `POST /api/chat` | Session-authenticated. Accepts `{ messages: [{ role, content }] }` and returns the assistant reply plus the lookups behind it. |
 | `GET /dashboard` | Private Next.js dashboard behind Google OAuth |
 
 ```json
@@ -195,6 +203,52 @@ access** permission granted. Full walkthrough in
 }
 ```
 
+## Chat assistant
+
+The **Assistant** tab answers natural-language questions about recorded
+transactions — "how much did I spend at Tim Hortons last month," "which merchant
+cost me the most this year," "how does August compare to July." A Groq model
+picks from two read-only tools and fills in their arguments; the tools run
+whitelisted, parameterized Supabase queries.
+
+```mermaid
+flowchart LR
+  panel["Assistant panel"] -->|"messages"| route["POST /api/chat<br/>session gate"]
+  route --> agent["chat-agent<br/>system prompt + tool loop"]
+  agent -->|"tool schemas"| groq["Groq<br/>gpt-oss-120b"]
+  groq -->|"tool calls"| agent
+  agent --> tools["chat-tools<br/>validate + query"]
+  tools --> db["Supabase<br/>expenses"]
+  db --> tools
+  tools --> agent
+  agent -->|"reply + lookups"| route
+```
+
+| Tool | Returns |
+| --- | --- |
+| `search_transactions` | Individual rows, newest first, up to 50 |
+| `aggregate_spending` | Total, transaction count, per-category breakdown, optional top-10 merchant ranking |
+
+Both accept the same filters — inclusive date range, one category, a merchant
+name fragment — and differ only in what comes back. The model never composes SQL
+and never receives database credentials. Because the dashboard's Supabase client
+uses the service role key and bypasses row-level security, the fixed tool
+whitelist in [`lib/chat-tools.ts`](lib/chat-tools.ts) is the only barrier between
+model output and a fully privileged connection; every argument is validated
+before a query is built.
+
+Replies list the lookups that produced them, so a misstated period is visible
+next to the number it produced.
+
+**Known limitations**, deliberately deferred — see
+[`docs/ASSISTANT.md`](docs/ASSISTANT.md) for detail:
+
+- Answers are not streamed, and a multi-lookup question can take up to ~20s.
+- Groq's free tier allows 8,000 tokens per minute, roughly 1–2 questions per
+  minute before rate limiting.
+- Read-only: the assistant cannot correct or delete transactions.
+- No sorting by amount, so "my three biggest transactions" is not answerable.
+
 ## Project structure
 
 ```text
@@ -203,7 +257,7 @@ src/
   core/           Security, database client, finance configuration
   schemas/        Pydantic v2 request/response contracts
   services/       LLM extraction layer
-app/              Next.js App Router — dashboard, auth, server actions
+app/              Next.js App Router — dashboard, auth, server actions, chat endpoint
 components/       React UI, including the finance panel components
 lib/              Analytics, data loading, mutations, shared types
 supabase/         Fresh-install schema plus ordered migrations
@@ -219,4 +273,6 @@ docs/             Architecture, deployment, Android setup, roadmap
 - [Deployment runbook](docs/DEPLOYMENT.md) — ordered migrations, verification,
   rollback
 - [Android client setup](docs/ANDROID_CLIENT.md) — capture layer walkthrough
+- [Chat assistant](docs/ASSISTANT.md) — tool-calling design, security model, and
+  known limitations
 - [Roadmap](docs/ROADMAP.md) — shipped and planned expansion work

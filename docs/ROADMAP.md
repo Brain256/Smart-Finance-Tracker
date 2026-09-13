@@ -77,6 +77,24 @@ Implementation checklist for extending the notification → FastAPI → AI class
 
 ---
 
+## 5. Chat Assistant
+
+### [x] 5.1 Tool-calling assistant over transactions
+- **What to build:** An Assistant tab that answers natural-language questions by having a Groq model call whitelisted, parameterized query functions — never model-composed SQL. Two read-only tools with an identical filter surface (date range, category, merchant fragment): `search_transactions` returns rows, `aggregate_spending` returns totals with a per-category breakdown and an optional top-10 merchant ranking. The tool loop, system prompt, and step cap live behind a transport-agnostic `runChatTurn`, so streaming can be added later without touching the tool layer.
+- **What it adds:** Answers the questions the fixed panels can't — merchant-scoped totals, arbitrary period comparisons, merchant rankings — without building a UI control for each one.
+- **As shipped:** MVP. Read-only, non-streaming, no sorting by amount. See [ASSISTANT.md](ASSISTANT.md) for the design and the full list of known limitations.
+
+### [ ] 5.2 Assistant follow-ups deferred from 5.1
+- **What to build:** Pick from, in rough order of value:
+  - `sortBy: "timestamp" | "amount"` on `search_transactions`, so "my three biggest transactions" becomes a database-side answer instead of an honest refusal (~40 lines).
+  - Stream the final reply. Multi-lookup questions currently take up to ~20s behind a thinking indicator. Note the tool phase has no tokens to stream, so this only improves the last leg.
+  - Reduce per-call token overhead (~2,100 tokens, mostly the fixed system prompt and tool schemas) or move off Groq's free 8,000 TPM tier, which currently caps sustained use at roughly 1–2 questions per minute.
+  - Write tools — category correction and deletion through chat — which would need transaction ids in the search projection and a confirmation step.
+  - A `group by normalized_merchant` RPC, so merchant ranking aggregates in Postgres rather than transferring every matching row.
+- **What it adds:** Each closes a specific gap documented in ASSISTANT.md. None is required for the assistant to be useful, which is why all were deferred.
+
+---
+
 ## Suggested Build Order
 
 1. **1.2 Confidence field** — small schema addition, needed for everything in section 2 and 4.3.
@@ -85,5 +103,6 @@ Implementation checklist for extending the notification → FastAPI → AI class
 4. **3.3 Recurring expense detection** — prerequisite for 3.5.
 5. **3.5 Cash-flow projection** — depends on 3.3 and 3.2/3.2b.
 6. Remaining features (3.1, 3.4, 4.1, 4.4) — any order, based on what's most useful to you day-to-day.
+7. **5.1 Chat assistant** — independent of the rest; only needs the `expenses` table and a Groq key. **5.2** is a menu, not a sequence: pick items after using 5.1 enough to know which gaps you actually hit.
 
 *(Idempotent ingestion was deferred — worth revisiting once retry logic, like the SQLite outbox / WorkManager work, is actually being built, since that's when duplicate-insert risk becomes real.)*

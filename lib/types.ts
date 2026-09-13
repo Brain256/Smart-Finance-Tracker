@@ -174,3 +174,114 @@ export type PeriodMetrics = {
   month: number;
   allTime: number;
 };
+
+/* ------------------------------------------------------------------ *
+ * Chat assistant
+ *
+ * The assistant answers read-only questions about transactions by calling
+ * whitelisted, parameterized query functions. It never composes SQL.
+ * ------------------------------------------------------------------ */
+
+/** Only user and assistant turns cross the transport; system and tool turns stay server-side. */
+export type ChatRole = "user" | "assistant";
+
+export type ChatMessage = {
+  role: ChatRole;
+  content: string;
+};
+
+/**
+ * Dispatchable tool names.
+ *
+ * A dedicated two-period comparison tool was deliberately not included: the model can
+ * compose the same answer from two parallel `aggregate_spending` calls, and the general
+ * path has to work anyway for comparisons that are not exactly two ranges. The
+ * `ComparePeriodsResult` types and their validator are retained unused so the tool can
+ * be added cheaply if the model's own delta arithmetic proves unreliable.
+ */
+export const chatToolNames = ["search_transactions", "aggregate_spending"] as const;
+
+export type ChatToolName = (typeof chatToolNames)[number];
+
+/** A single transaction projected down to the fields worth spending tokens on. */
+export type ChatTransactionMatch = {
+  merchant: string;
+  amount: number;
+  category: ExpenseCategory;
+  /** Finance-local YYYY-MM-DD date of the transaction. */
+  date: string;
+};
+
+export type SearchTransactionsResult = {
+  startDate: string;
+  endDate: string;
+  returnedCount: number;
+  /** True when the result hit the row limit, so more matches exist than were returned. */
+  truncated: boolean;
+  transactions: ChatTransactionMatch[];
+};
+
+export type CategorySpendingTotal = {
+  category: SpendingCategory;
+  total: number;
+  transactionCount: number;
+};
+
+export type MerchantSpendingTotal = {
+  /** Display name, taken from the highest-spend raw variant within the group. */
+  merchant: string;
+  total: number;
+  transactionCount: number;
+};
+
+export type AggregateSpendingResult = {
+  startDate: string;
+  endDate: string;
+  total: number;
+  transactionCount: number;
+  categoryTotals: CategorySpendingTotal[];
+  /** Top merchants by total, present only when the merchant breakdown was requested. */
+  merchantTotals?: MerchantSpendingTotal[];
+  /**
+   * Merchants beyond the returned top group. Reported so a truncated ranking is never
+   * mistaken for the complete list of merchants in the range.
+   */
+  otherMerchantCount?: number;
+  otherMerchantTotal?: number;
+};
+
+export type PeriodSpendingSummary = {
+  startDate: string;
+  endDate: string;
+  total: number;
+  transactionCount: number;
+};
+
+export type ComparePeriodsResult = {
+  current: PeriodSpendingSummary;
+  baseline: PeriodSpendingSummary;
+  absoluteDelta: number;
+  /** Null when the baseline total is zero, so the value is never Infinity or NaN. */
+  percentageDelta: number | null;
+};
+
+export type ChatToolResultData =
+  | SearchTransactionsResult
+  | AggregateSpendingResult
+  | ComparePeriodsResult;
+
+/**
+ * A record of one tool the model invoked. Returned alongside the reply so a wrong
+ * answer can be diagnosed against the query that produced it.
+ */
+export type ChatToolInvocation = {
+  /** Loosely typed on purpose: an invented tool name is worth surfacing, not discarding. */
+  name: string;
+  arguments: Record<string, unknown>;
+  ok: boolean;
+};
+
+export type ChatTurnResult = MutationResult<{
+  reply: string;
+  toolCalls: ChatToolInvocation[];
+}>;

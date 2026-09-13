@@ -1,3 +1,9 @@
+import {
+  addCalendarDays,
+  getFinanceDateKey,
+  getFinanceMonthKey,
+  parseDateKey
+} from "@/lib/finance-dates";
 import type {
   CashFlowProjection,
   CategoryBudget,
@@ -9,6 +15,13 @@ import type {
   SavingsTarget,
   SpendingCategory
 } from "@/lib/types";
+
+/**
+ * Re-exported so existing consumers keep importing finance-local date keys from the
+ * analytics module. The implementations now live in lib/finance-dates.ts, shared with
+ * the dashboard read path and the chat tool layer.
+ */
+export { getFinanceDateKey, getFinanceMonthKey };
 
 export type PlanningPrerequisite = "active-income" | "savings-target";
 export type PlanningLimits =
@@ -92,7 +105,6 @@ export type HeatmapGrid = {
 /** One zero band plus the four ordered non-zero bands shared with the legend. */
 export const NON_ZERO_INTENSITY_LEVEL_COUNT = 4;
 
-const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const MONTH_KEY_PATTERN = /^\d{4}-\d{2}$/;
 const DAYS_PER_WEEK = 7;
 
@@ -109,31 +121,6 @@ function assertFinite(value: number, fieldName: string): void {
   }
 }
 
-function parseDateKey(dateKey: string): { year: number; month: number; day: number } {
-  if (!DATE_KEY_PATTERN.test(dateKey)) {
-    throw new RangeError("Date keys must use YYYY-MM-DD.");
-  }
-
-  const [year, month, day] = dateKey.split("-").map(Number);
-  const parsed = new Date(Date.UTC(year, month - 1, day));
-  if (
-    parsed.getUTCFullYear() !== year ||
-    parsed.getUTCMonth() !== month - 1 ||
-    parsed.getUTCDate() !== day
-  ) {
-    throw new RangeError("Date key is not a calendar date.");
-  }
-
-  return { year, month, day };
-}
-
-function addCalendarDays(dateKey: string, days: number): string {
-  const { year, month, day } = parseDateKey(dateKey);
-  const result = new Date(Date.UTC(year, month - 1, day));
-  result.setUTCDate(result.getUTCDate() + days);
-  return result.toISOString().slice(0, 10);
-}
-
 function getDaysInMonth(dateKey: string): number {
   const { year, month } = parseDateKey(dateKey);
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
@@ -142,24 +129,6 @@ function getDaysInMonth(dateKey: string): number {
 function getMonthKeyFromDateKey(dateKey: string): string {
   parseDateKey(dateKey);
   return dateKey.slice(0, 7);
-}
-
-function getDateParts(date: Date, timeZone: string): Record<string, string> {
-  if (!Number.isFinite(date.getTime())) {
-    throw new RangeError("Date must be valid.");
-  }
-
-  return Object.fromEntries(
-    new Intl.DateTimeFormat("en-CA", {
-      timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit"
-    })
-      .formatToParts(date)
-      .filter((part) => part.type !== "literal")
-      .map((part) => [part.type, part.value])
-  );
 }
 
 function getExpenseDateKey(expense: ExpenseRecord, timeZone: string): string {
@@ -249,17 +218,6 @@ export function amountToCents(amount: number): number {
 export function centsToAmount(cents: number): number {
   assertFinite(cents, "Cents");
   return cents / 100;
-}
-
-/** Returns the YYYY-MM-DD key for an instant in the configured finance timezone. */
-export function getFinanceDateKey(date: Date, timeZone: string): string {
-  const parts = getDateParts(date, timeZone);
-  return `${parts.year}-${parts.month}-${parts.day}`;
-}
-
-/** Returns the YYYY-MM key for an instant in the configured finance timezone. */
-export function getFinanceMonthKey(date: Date, timeZone: string): string {
-  return getFinanceDateKey(date, timeZone).slice(0, 7);
 }
 
 /** Income is the only category that is not spending. */

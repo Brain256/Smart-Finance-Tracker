@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { deleteExpense } from "@/app/dashboard/actions";
 import { CalendarHeatmap } from "@/components/finance/calendar-heatmap";
+import { ChatPanel } from "@/components/finance/chat-panel";
 import { OverviewPanel } from "@/components/finance/overview-panel";
 import { SettingsPanel } from "@/components/finance/settings-panel";
 import { TransactionsPanel } from "@/components/finance/transactions-panel";
@@ -170,6 +171,14 @@ export function DashboardClient({
             onSortStateChange={setSortState}
             reviewThreshold={reviewThreshold}
             sortState={sortState}
+          />
+        ) : null}
+        {activeTab === "assistant" ? (
+          // canDelete is false exactly when the dashboard fell back to sample data, where
+          // the assistant would answer from a live database the user is not looking at.
+          <ChatPanel
+            disabledReason="The assistant needs a live expense-data connection. It is unavailable while the dashboard is showing sample data."
+            isEnabled={canDelete}
           />
         ) : null}
         {activeTab === "settings" ? (

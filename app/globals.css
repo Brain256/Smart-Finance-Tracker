@@ -213,6 +213,16 @@ button {
   animation: dashboard-recent-row-enter 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+/* Replies arrive as one block rather than streaming, so the fade softens their arrival. */
+.dashboard-chat-turn {
+  animation: dashboard-chat-turn-enter 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.dashboard-chat-pulse {
+  animation: dashboard-chat-pulse 1.4s ease-in-out infinite;
+  display: inline-flex;
+}
+
 @keyframes dashboard-tab-enter {
   from {
     opacity: 0;
@@ -237,6 +247,29 @@ button {
   }
 }
 
+@keyframes dashboard-chat-turn-enter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 0.4rem, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes dashboard-chat-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
@@ -252,7 +285,9 @@ button {
   }
 
   .dashboard-tab-content,
-  .dashboard-recent-row {
+  .dashboard-recent-row,
+  .dashboard-chat-turn,
+  .dashboard-chat-pulse {
     animation: none !important;
     transform: none !important;
   }
